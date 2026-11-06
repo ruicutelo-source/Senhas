@@ -1,0 +1,164 @@
+<!doctype html>
+<html lang="pt-PT">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Senhas</title>
+<link rel="manifest" href="manifest.webmanifest">
+<meta name="theme-color" content="#34495e">
+<link rel="icon" href="icon-192.png">
+<link rel="apple-touch-icon" href="icon-192.png">
+<link rel="stylesheet" href="style.css">
+<style id="estiloPagina">@page { size: 80mm 45mm; margin: 0; }</style>
+</head>
+<body>
+<div id="app">
+
+  <!-- ===================== ENTRADA ===================== -->
+  <section id="ecraEntrada" class="ecra">
+    <div class="entrada-caixa">
+      <img id="entradaLogo" class="entrada-logo" alt="" hidden>
+      <h1 id="entradaEvento">Senhas</h1>
+      <p id="entradaData" class="entrada-data"></p>
+      <button class="btn btn-entrada verde" data-acao="entrarVendedor">VENDEDOR</button>
+      <button class="btn btn-entrada escuro" data-acao="entrarAdmin">ADMINISTRADOR</button>
+      <p class="versao" id="versaoEntrada"></p>
+    </div>
+  </section>
+
+  <!-- ===================== TOPO ===================== -->
+  <header id="topo" hidden>
+    <div class="topo-evento">
+      <div id="topoEvento" class="topo-nome"></div>
+      <div id="topoData" class="topo-data"></div>
+    </div>
+    <div id="topoTurno" class="chip"></div>
+    <nav class="topo-nav">
+      <button class="btn nav" data-acao="irVenda" id="navVenda">VENDA</button>
+      <button class="btn nav" data-acao="irDefinicoes" id="navDefinicoes">DEFINIÇÕES</button>
+      <button class="btn nav modo" data-acao="trocarModo" id="navModo">MODO</button>
+    </nav>
+  </header>
+
+  <main>
+    <!-- ===================== VENDA ===================== -->
+    <section id="ecraVenda" class="ecra" hidden>
+      <div class="painel">
+        <div class="cartao cartao-produtos">
+          <div class="rotulo">QUANTIDADE DE SENHAS</div>
+          <div class="linha-qtd">
+            <button class="btn cinza qtd-btn" data-acao="qtdMenos" aria-label="Menos">&minus;</button>
+            <input id="qtd" class="qtd" type="number" inputmode="numeric" min="0" max="999" value="0" aria-label="Quantidade">
+            <button class="btn cinza qtd-btn" data-acao="qtdMais" aria-label="Mais">+</button>
+            <button class="btn pacote" id="btnPac1" data-acao="pacote" data-k="1"></button>
+            <button class="btn pacote" id="btnPac2" data-acao="pacote" data-k="2"></button>
+            <button class="btn oferta" data-acao="oferta">OFERTA</button>
+          </div>
+          <div class="grelha-grandes" id="grelhaGrandes"></div>
+          <div class="grelha-fila" id="grelhaFila"></div>
+          <div class="ultimo"><b>Último pedido:</b> <span id="ultimoPedido"></span></div>
+        </div>
+
+        <div class="cartao cartao-pedido">
+          <div class="pedido-cabecalho">PEDIDO ATUAL</div>
+          <div class="pedido-lista" id="pedidoLista"></div>
+          <div class="pedido-total" id="pedidoTotal">TOTAL 0,00 €</div>
+          <div class="pedido-acoes">
+            <button class="btn verde imprimir" data-acao="imprimirPedido">IMPRIMIR PEDIDO</button>
+            <button class="btn cinza" data-acao="removerUltimo">REMOVER ÚLTIMO</button>
+            <button class="btn cinza-escuro" data-acao="limparPedido">LIMPAR</button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ===================== DEFINIÇÕES ===================== -->
+    <section id="ecraDefinicoes" class="ecra" hidden>
+      <div class="definicoes">
+
+        <div class="cartao bloco">
+          <h2>Evento</h2>
+          <div class="campos">
+            <label>Nome do evento <input id="defEvento" maxlength="40"></label>
+            <label>Data do evento <input id="defData" type="date"></label>
+            <label>Nome deste posto de venda <input id="defPosto" maxlength="20"></label>
+          </div>
+          <button class="btn azul" data-acao="gravarEvento">GRAVAR EVENTO</button>
+        </div>
+
+        <div class="cartao bloco">
+          <h2>Impressão das senhas</h2>
+          <div class="campos">
+            <label>Largura do rolo
+              <select id="defLargura"><option value="80">80 mm</option><option value="58">58 mm</option></select>
+            </label>
+            <label>Altura de cada senha (mm) <input id="defAltura" type="number" min="25" max="120" step="1"></label>
+          </div>
+          <div class="logo-linha">
+            <div class="logo-amostra"><img id="defLogoImg" alt="" hidden><span id="defLogoVazio">Sem logótipo</span></div>
+            <div class="logo-botoes">
+              <label class="btn azul ficheiro">ESCOLHER LOGÓTIPO<input id="defLogoFicheiro" type="file" accept="image/*" hidden></label>
+              <button class="btn cinza" data-acao="removerLogo">REMOVER LOGÓTIPO</button>
+            </div>
+          </div>
+          <div class="botoes-linha">
+            <button class="btn azul" data-acao="gravarImpressao">GRAVAR IMPRESSÃO</button>
+            <button class="btn cinza-escuro" data-acao="preVisualizar">PRÉ-VISUALIZAR SENHA</button>
+            <button class="btn cinza-escuro" data-acao="testeImpressao">IMPRIMIR SENHA DE TESTE</button>
+          </div>
+        </div>
+
+        <div class="cartao bloco">
+          <h2>Pacotes <small>(só para os produtos com «Usa pacotes»)</small></h2>
+          <table class="tabela">
+            <thead><tr><th>Pacote</th><th>Senhas</th><th>Preço do pacote (€)</th><th>Preço por senha</th></tr></thead>
+            <tbody id="defPacotes"></tbody>
+          </table>
+          <p class="nota">Até ao 1.º pacote é avulso (preço normal). Quantidades maiores dividem-se em pacotes, do maior para o menor, e o resto é avulso (ex.: 10 = Pacote 1 + 2 avulso). 0 senhas = pacote não usado.</p>
+          <button class="btn azul" data-acao="gravarPacotes">GRAVAR PACOTES</button>
+        </div>
+
+        <div class="cartao bloco">
+          <h2>Produtos <small>(1 e 2 = botões grandes; 3 a 8 = 1.ª fila; 9 a 14 = 2.ª fila)</small></h2>
+          <div class="tabela-rolar">
+            <table class="tabela produtos">
+              <thead><tr><th>Nº</th><th>Produto</th><th>Preço normal (€)</th><th>Prefixo</th><th>Cor</th><th>Ativo</th><th>Usa pacotes</th><th>Próximo nº</th></tr></thead>
+              <tbody id="defProdutos"></tbody>
+            </table>
+          </div>
+          <p class="nota">Nome vazio = o botão não aparece. «Usa pacotes» só nos Finos. O próximo nº é atualizado sozinho; não o altere a meio de um evento.</p>
+          <button class="btn azul" data-acao="gravarProdutos">GRAVAR PRODUTOS</button>
+        </div>
+
+        <div class="cartao bloco">
+          <h2>Palavra-passe de administrador</h2>
+          <div class="campos">
+            <label>Palavra-passe atual <input id="pwAtual" type="password" autocomplete="current-password"></label>
+            <label>Nova palavra-passe <input id="pwNova" type="password" autocomplete="new-password"></label>
+            <label>Repetir a nova <input id="pwNova2" type="password" autocomplete="new-password"></label>
+          </div>
+          <button class="btn azul" data-acao="mudarPalavraPasse">MUDAR PALAVRA-PASSE</button>
+        </div>
+
+        <p class="versao" id="versaoDef"></p>
+      </div>
+    </section>
+  </main>
+</div>
+
+<!-- ===================== JANELA (diálogos) ===================== -->
+<div id="fundoModal" hidden>
+  <div class="modal" role="dialog" aria-modal="true">
+    <h3 id="modalTitulo"></h3>
+    <div id="modalCorpo"></div>
+    <input id="modalInput" hidden>
+    <div class="modal-botoes" id="modalBotoes"></div>
+  </div>
+</div>
+
+<!-- ===================== IMPRESSÃO ===================== -->
+<div id="areaImpressao"></div>
+
+<script src="app.js"></script>
+</body>
+</html>

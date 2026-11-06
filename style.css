@@ -1,0 +1,183 @@
+/* ===================== Senhas — estilos ===================== */
+:root {
+  --fundo: #eef0f3;
+  --escuro: #34495e;
+  --escuro2: #1a2530;
+  --chip: #4a6278;
+  --borda: #dce0e4;
+  --cinza: #7f8c8d;
+  --cinza-claro: #95a5a6;
+  --inativo: #c7c9cb;
+  --verde: #27ae60;
+  --azul: #2980b9;
+  --vermelho: #c0392b;
+  --dourado: #d4a017;
+  --amarelo: #fff8e1;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; }
+body {
+  font-family: Arial, Helvetica, sans-serif;
+  background: var(--fundo);
+  color: #222;
+  -webkit-tap-highlight-color: transparent;
+}
+[hidden] { display: none !important; }
+
+/* ---------- Botões ---------- */
+.btn {
+  border: 0; border-radius: 10px; cursor: pointer;
+  font: bold 14px Arial, sans-serif; color: #fff;
+  padding: 10px 14px; touch-action: manipulation;
+  transition: filter .1s, transform .05s;
+}
+.btn:active { transform: scale(.97); filter: brightness(.9); }
+.verde { background: var(--verde); }
+.azul { background: var(--azul); }
+.escuro { background: var(--escuro); }
+.cinza { background: var(--cinza-claro); }
+.cinza-escuro { background: var(--cinza); }
+.vermelho { background: var(--vermelho); }
+.contorno-vermelho { background: #fff; color: var(--vermelho); border: 2px solid var(--vermelho); }
+
+/* ---------- Entrada ---------- */
+#ecraEntrada { min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 16px; background: var(--escuro); }
+.entrada-caixa { background: #fff; border-radius: 16px; padding: 28px 24px; width: 100%; max-width: 380px; text-align: center; box-shadow: 0 10px 30px rgba(0,0,0,.25); }
+.entrada-logo { max-height: 110px; max-width: 80%; margin-bottom: 8px; }
+.entrada-caixa h1 { margin: 4px 0; color: var(--escuro); font-size: 26px; }
+.entrada-data { margin: 0 0 18px; color: var(--cinza); }
+.btn-entrada { display: block; width: 100%; font-size: 20px; padding: 18px; margin: 10px 0; }
+.versao { color: var(--cinza); font-size: 12px; margin-top: 14px; text-align: center; }
+
+/* ---------- Topo ---------- */
+#topo {
+  background: var(--escuro); color: #fff;
+  display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+  padding: 10px 16px;
+  position: sticky; top: 0; z-index: 5;
+}
+.topo-evento { flex: 1 1 200px; min-width: 0; }
+.topo-nome { font-size: 22px; font-weight: bold; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.topo-data { font-size: 12px; color: #c8d0d8; }
+.chip { background: var(--chip); border-radius: 8px; padding: 8px 14px; font-weight: bold; font-size: 14px; white-space: nowrap; }
+.topo-nav { display: flex; gap: 8px; }
+.btn.nav { background: var(--chip); padding: 10px 14px; }
+.btn.nav.ativo { background: #fff; color: var(--escuro); }
+.btn.nav.modo { background: var(--escuro2); }
+
+main { padding: 16px; }
+
+/* ---------- Painel de venda ---------- */
+.painel { display: grid; grid-template-columns: minmax(0, 2.2fr) minmax(280px, 1fr); gap: 16px; align-items: start; max-width: 1400px; margin: 0 auto; }
+.cartao { background: #fff; border: 1px solid var(--borda); border-radius: 12px; padding: 14px; }
+.rotulo { font-size: 11px; font-weight: bold; color: var(--cinza); margin-bottom: 6px; }
+
+.linha-qtd { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 8px; margin-bottom: 14px; }
+.qtd-btn { font-size: 30px; min-height: 64px; }
+.qtd {
+  width: 100%; min-height: 64px; text-align: center;
+  font: bold 32px Arial, sans-serif;
+  background: var(--amarelo); border: 2px solid var(--escuro); border-radius: 10px;
+  -moz-appearance: textfield;
+}
+.qtd::-webkit-outer-spin-button, .qtd::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+.btn.pacote { background: var(--azul); min-height: 64px; line-height: 1.25; white-space: pre-line; font-size: 15px; }
+.btn.pacote small { font-weight: normal; font-size: 13px; }
+.btn.oferta { background: var(--dourado); min-height: 64px; font-size: 17px; }
+
+.grelha-grandes { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; margin-bottom: 12px; }
+.grelha-fila { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 10px; }
+.btn.prod { min-height: 72px; padding: 6px; line-height: 1.15; overflow-wrap: normal; word-break: normal; hyphens: none; }
+.grelha-grandes .btn.prod { min-height: 96px; font-size: 32px; }
+.btn.prod.inativo { background: var(--inativo) !important; color: #fff; }
+.btn.prod .sub { display: block; font-size: 11px; font-weight: normal; margin-top: 3px; }
+.btn.desligado { background: var(--inativo) !important; }
+
+.ultimo { margin-top: 14px; font-size: 13px; color: var(--cinza); }
+
+/* ---------- Pedido ---------- */
+.cartao-pedido { padding: 0; overflow: hidden; display: flex; flex-direction: column; }
+.pedido-cabecalho { background: var(--escuro); color: #fff; font-weight: bold; padding: 10px 14px; }
+.pedido-lista { min-height: 220px; max-height: 46vh; overflow-y: auto; padding: 8px 10px; }
+.pedido-lista table { width: 100%; border-collapse: collapse; font-size: 14px; }
+.pedido-lista th { text-align: left; color: var(--cinza); font-size: 12px; border-bottom: 1px solid var(--borda); padding: 4px 2px; }
+.pedido-lista td { padding: 6px 2px; border-bottom: 1px solid #f0f2f4; }
+.pedido-lista .num { text-align: right; white-space: nowrap; }
+.pedido-lista .tipo { text-align: center; font-weight: bold; color: var(--escuro); }
+.pedido-lista .of { color: var(--dourado); }
+.pedido-vazio { color: var(--cinza); padding: 24px 6px; text-align: center; line-height: 1.6; }
+.pedido-total { background: #ecf0f1; color: var(--escuro); font: bold 26px Arial, sans-serif; text-align: center; padding: 14px; margin: 10px; border-radius: 10px; }
+.pedido-acoes { display: grid; grid-template-columns: 2fr 1fr 1fr; gap: 8px; padding: 0 10px 12px; }
+.pedido-acoes .btn { min-height: 60px; font-size: 13px; }
+.pedido-acoes .imprimir { font-size: 16px; }
+
+/* ---------- Definições ---------- */
+.definicoes { max-width: 1100px; margin: 0 auto; display: grid; gap: 16px; }
+.bloco h2 { margin: 0 0 12px; font-size: 18px; color: var(--escuro); }
+.bloco h2 small { font-weight: normal; font-size: 12px; color: var(--cinza); }
+.campos { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; margin-bottom: 12px; }
+.campos label { display: flex; flex-direction: column; gap: 4px; font-size: 13px; color: #444; }
+input, select { font: 15px Arial, sans-serif; padding: 8px; border: 1px solid #c5cbd1; border-radius: 6px; background: #fff; }
+.tabela { width: 100%; border-collapse: collapse; font-size: 14px; margin-bottom: 8px; }
+.tabela th { background: var(--escuro); color: #fff; padding: 8px 6px; font-size: 12px; }
+.tabela td { padding: 4px; border-bottom: 1px solid var(--borda); text-align: center; }
+.tabela input, .tabela select { width: 100%; padding: 6px; }
+.tabela input[type=checkbox] { width: 22px; height: 22px; }
+.tabela .calc { color: var(--cinza); white-space: nowrap; }
+.tabela-rolar { overflow-x: auto; }
+.produtos td:nth-child(1) { background: #f0f0f0; font-weight: bold; width: 40px; }
+.produtos td:nth-child(2) { min-width: 160px; }
+.produtos td:nth-child(3), .produtos td:nth-child(4), .produtos td:nth-child(8) { width: 100px; }
+.nota { font-size: 12px; color: var(--cinza); font-style: italic; margin: 4px 0 12px; }
+.logo-linha { display: flex; gap: 16px; align-items: center; flex-wrap: wrap; margin-bottom: 12px; }
+.logo-amostra { width: 140px; height: 100px; border: 1px dashed #c5cbd1; border-radius: 8px; display: flex; align-items: center; justify-content: center; color: var(--cinza); font-size: 12px; }
+.logo-amostra img { max-width: 130px; max-height: 90px; }
+.logo-botoes, .botoes-linha { display: flex; gap: 8px; flex-wrap: wrap; }
+.btn.ficheiro { display: inline-block; }
+
+/* ---------- Janela ---------- */
+#fundoModal { position: fixed; inset: 0; background: rgba(20,30,40,.55); display: flex; align-items: center; justify-content: center; z-index: 20; padding: 16px; }
+.modal { background: #fff; border-radius: 14px; padding: 20px; width: 100%; max-width: 480px; max-height: 90vh; overflow-y: auto; box-shadow: 0 10px 40px rgba(0,0,0,.3); }
+.modal h3 { margin: 0 0 12px; color: var(--escuro); }
+#modalCorpo { font-size: 15px; line-height: 1.5; }
+#modalInput { width: 100%; margin-top: 12px; font-size: 17px; }
+.modal-botoes { display: flex; gap: 10px; justify-content: flex-end; margin-top: 18px; flex-wrap: wrap; }
+.modal-botoes .btn { min-width: 110px; min-height: 48px; font-size: 15px; }
+.resumo td { padding: 3px 4px; }
+.resumo .num { text-align: right; white-space: nowrap; }
+.cobrar { font-size: 24px; font-weight: bold; color: var(--escuro); margin-top: 10px; }
+.previa { display: flex; justify-content: center; background: #ddd; padding: 12px; border-radius: 8px; }
+.previa .senha { background: #fff; box-shadow: 0 2px 8px rgba(0,0,0,.2); }
+
+/* ---------- Senha (ecrã e impressão) ---------- */
+.senha { display: flex; flex-direction: column; align-items: center; justify-content: center; overflow: hidden; color: #000; background: #fff; }
+.senha .s-logo { object-fit: contain; display: block; }
+.senha .s-nome { font-family: Arial, Helvetica, sans-serif; font-weight: bold; white-space: nowrap; text-align: center; line-height: 1.2; }
+#areaImpressao { display: none; }
+
+/* ---------- Tablet e telemóvel ---------- */
+@media (max-width: 1000px) {
+  .painel { grid-template-columns: 1fr; }
+  .pedido-lista { max-height: none; min-height: 120px; }
+}
+@media (max-width: 700px) {
+  main { padding: 10px; }
+  #topo { padding: 8px 10px; gap: 8px; }
+  .topo-nome { font-size: 18px; }
+  .chip { order: 3; width: 100%; text-align: center; }
+  .topo-nav { margin-left: auto; }
+  .btn.nav { padding: 8px 10px; font-size: 12px; }
+  .linha-qtd { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .grelha-fila { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .grelha-grandes .btn.prod { font-size: 24px; min-height: 80px; }
+  .pedido-total { font-size: 22px; }
+}
+
+/* ---------- Impressão ---------- */
+@media print {
+  html, body { background: #fff; height: auto; }
+  #app, #fundoModal { display: none !important; }
+  #areaImpressao { display: block; }
+  #areaImpressao .senha { page-break-after: always; break-after: page; }
+  #areaImpressao .senha:last-child { page-break-after: auto; break-after: auto; }
+}
