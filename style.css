@@ -143,6 +143,12 @@ details.chave summary { cursor: pointer; font-weight: bold; color: var(--escuro)
 details.chave textarea { width: 100%; font: 12px Consolas, monospace; padding: 8px; border: 1px solid #c5cbd1; border-radius: 6px; margin-bottom: 8px; }
 .previa img.raster { image-rendering: pixelated; width: 72mm; background: #fff; box-shadow: 0 2px 8px rgba(0,0,0,.2); }
 
+.claridade { border: 1px solid var(--borda); border-radius: 8px; padding: 10px 12px; margin-bottom: 12px; }
+.claridade label { display: flex; flex-direction: column; gap: 6px; font-size: 13px; color: #444; }
+.claridade input[type=range] { width: 100%; max-width: 420px; padding: 0; border: 0; }
+.claridade-escala { display: flex; justify-content: space-between; max-width: 420px; font-size: 11px; color: var(--cinza); }
+#defClaridadeImg { display: block; width: 72mm; max-width: 100%; margin-top: 8px; border: 1px solid var(--borda); image-rendering: pixelated; }
+
 /* ---------- Janela ---------- */
 #fundoModal { position: fixed; inset: 0; background: rgba(20,30,40,.55); display: flex; align-items: center; justify-content: center; z-index: 20; padding: 16px; }
 .modal { background: #fff; border-radius: 14px; padding: 20px; width: 100%; max-width: 480px; max-height: 90vh; overflow-y: auto; box-shadow: 0 10px 40px rgba(0,0,0,.3); }

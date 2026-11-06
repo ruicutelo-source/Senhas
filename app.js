@@ -5,7 +5,7 @@
    A estrutura dos dados está pensada para passar mais tarde ao Firebase.
    ===================================================================== */
 
-const VERSAO = '1.1';
+const VERSAO = '1.2';
 const PROD_N = 14;
 const PAC_N = 2;
 const SENHA_INICIAL = '1234';
@@ -39,7 +39,7 @@ ea3ubs+lUfOXZrJO15vRzpMV0Fg1mqdg4t/YMyevI9g2u6ReKgtWcWs=
 const CONFIG_PADRAO = {
   evento: 'Magusto 2026/1', data: '2026-11-04', posto: 'Posto 1',
   largura: 80, alturaSenha: 45, logo: '', senhaHash: '',
-  modoImpressao: 'qz', impressora: 'BP-T3', avanco: 3, imgModo: 'gs_v_0', chaveQZ: ''
+  modoImpressao: 'qz', impressora: 'BP-T3', avanco: 3, imgModo: 'gs_v_0', chaveQZ: '', claridade: 0
 };
 
 const CORES = {
@@ -660,7 +660,23 @@ function carregarImagem(src) {
   });
 }
 
-// Pontilhado Floyd–Steinberg: tons de cinzento em pontos pretos e brancos
+// Claridade do logótipo: -50 (mais escuro) a +50 (mais claro), aplicada só à zona do logótipo
+function aplicarClaridade(ctx, x, y, w, h, claridade) {
+  if (!claridade || w <= 0 || h <= 0) return;
+  const g = Math.pow(2, -claridade / 50);            // +50 → 0,5 (clareia) · -50 → 2 (escurece)
+  const lut = new Uint8ClampedArray(256);
+  for (let i = 0; i < 256; i++) lut[i] = Math.round(255 * Math.pow(i / 255, g));
+  const img = ctx.getImageData(x, y, w, h);
+  const d = img.data;
+  for (let i = 0; i < d.length; i += 4) {
+    const v = lut[Math.round(0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2])];
+    d[i] = d[i + 1] = d[i + 2] = v;
+  }
+  ctx.putImageData(img, x, y);
+}
+
+// Pontilhado Atkinson (o mais indicado para térmicas): tons de cinzento em pontos pretos e brancos.
+// Espalha só 3/4 do erro, por isso as zonas escuras ficam mais limpas e o desenho mais nítido.
 function pontilhar(ctx, w, h) {
   const img = ctx.getImageData(0, 0, w, h);
   const d = img.data;
@@ -669,17 +685,16 @@ function pontilhar(ctx, w, h) {
     const a = d[i * 4 + 3] / 255;
     g[i] = (0.299 * d[i * 4] + 0.587 * d[i * 4 + 1] + 0.114 * d[i * 4 + 2]) * a + 255 * (1 - a);
   }
+  const viz = [[1, 0], [2, 0], [-1, 1], [0, 1], [1, 1], [0, 2]];
   for (let y = 0; y < h; y++) {
     for (let x = 0; x < w; x++) {
       const i = y * w + x;
       const novo = g[i] < 128 ? 0 : 255;
-      const erro = g[i] - novo;
+      const erro = (g[i] - novo) / 8;
       g[i] = novo;
-      if (x + 1 < w) g[i + 1] += erro * 7 / 16;
-      if (y + 1 < h) {
-        if (x > 0) g[i + w - 1] += erro * 3 / 16;
-        g[i + w] += erro * 5 / 16;
-        if (x + 1 < w) g[i + w + 1] += erro * 1 / 16;
+      for (const [dx, dy] of viz) {
+        const xx = x + dx, yy = y + dy;
+        if (xx >= 0 && xx < w && yy < h) g[yy * w + xx] += erro;
       }
     }
   }
@@ -692,7 +707,8 @@ function pontilhar(ctx, w, h) {
 }
 
 // Senha = logótipo (2,5 cm de altura) + nome do produto (encolhe se não couber)
-async function desenharSenha(nome) {
+async function desenharSenha(nome, claridade) {
+  if (claridade === undefined) claridade = int(E.config.claridade);
   const W = pontosLargura();
   const txt = nome.toUpperCase();
   const logo = E.config.logo ? await carregarImagem(E.config.logo) : null;
@@ -714,7 +730,12 @@ async function desenharSenha(nome) {
   ctx.fillStyle = '#fff';
   ctx.fillRect(0, 0, W, H);
   let y = 8;
-  if (logo) { ctx.drawImage(logo, Math.round((W - lw) / 2), y, lw, lh); y += lh + 12; }
+  if (logo) {
+    const lx = Math.round((W - lw) / 2);
+    ctx.drawImage(logo, lx, y, lw, lh);
+    aplicarClaridade(ctx, lx, y, lw, lh, claridade);
+    y += lh + 12;
+  }
   ctx.fillStyle = '#000';
   ctx.font = `bold ${fs}px Arial, Helvetica, sans-serif`;
   ctx.textAlign = 'center';
@@ -909,6 +930,8 @@ function renderDefinicoes() {
   $('defModo').value = c.modoImpressao;
   $('defAvanco').value = c.avanco;
   $('defImgModo').value = c.imgModo;
+  $('defClaridade').value = c.claridade;
+  atualizarClaridade();
   preencherImpressoras([]);
   mostrarBlocosImpressao();
   renderChave();
@@ -988,11 +1011,27 @@ async function gravarImpressao() {
   E.config.impressora = $('defImpressora').value || E.config.impressora;
   E.config.avanco = av;
   E.config.imgModo = $('defImgModo').value;
+  E.config.claridade = int($('defClaridade').value);
   await guardar();
   aviso('Impressão gravada.' + (E.config.modoImpressao === 'qz' ? '\nImpressora: ' + E.config.impressora : ''));
 }
 
 $('defModo').addEventListener('change', mostrarBlocosImpressao);
+
+// Claridade: mostra logo como fica (só o logótipo, já em pontos)
+let previaPendente = null;
+function atualizarClaridade() {
+  const v = int($('defClaridade').value);
+  $('defClaridadeValor').textContent = v > 0 ? '+' + v : String(v);
+  clearTimeout(previaPendente);
+  previaPendente = setTimeout(async () => {
+    const img = $('defClaridadeImg');
+    if (!E.config.logo) { img.hidden = true; return; }
+    img.src = await desenharSenha(nomeMaisComprido(), v);
+    img.hidden = false;
+  }, 120);
+}
+$('defClaridade').addEventListener('input', atualizarClaridade);
 
 $('defLogoFicheiro').addEventListener('change', async e => {
   const f = e.target.files[0];
@@ -1002,6 +1041,7 @@ $('defLogoFicheiro').addEventListener('change', async e => {
     E.config.logo = await reduzirImagem(f, 600);
     await guardar();
     renderLogoDef();
+    atualizarClaridade();
     aviso('Logótipo gravado.');
   } catch (err) {
     aviso('Não foi possível ler a imagem: ' + err);
@@ -1038,6 +1078,7 @@ async function removerLogo() {
   E.config.logo = '';
   await guardar();
   renderLogoDef();
+  atualizarClaridade();
 }
 
 async function gravarPacotes() {
