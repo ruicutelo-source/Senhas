@@ -5,7 +5,7 @@
    A estrutura dos dados está pensada para passar mais tarde ao Firebase.
    ===================================================================== */
 
-const VERSAO = '3.1';
+const VERSAO = '3.2';
 const PROD_N = 14;
 const PAC_N = 2;
 const SENHA_INICIAL = '1234';
@@ -542,7 +542,7 @@ function renderPedido() {
     let h = '<table><thead><tr><th>Produto</th><th class="tipo">Tipo</th><th class="num">Qtd</th><th class="num">Valor</th></tr></thead><tbody>';
     for (const l of E.pedido) {
       h += `<tr${l.fmt === 'Oferta' ? ' class="of"' : ''}><td>${esc(prod(l.prod).nome)}</td>` +
-        `<td class="tipo">${fmtCurto(l.fmt)}</td><td class="num">${l.qtd}</td><td class="num">${euro(l.valor)}</td></tr>`;
+        `<td class="tipo">${esc(l.fmt)}</td><td class="num">${l.qtd}</td><td class="num">${euro(l.valor)}</td></tr>`;
     }
     caixa.innerHTML = h + '</tbody></table>';
     caixa.scrollTop = caixa.scrollHeight;
