@@ -5,7 +5,7 @@
    A estrutura dos dados está pensada para passar mais tarde ao Firebase.
    ===================================================================== */
 
-const VERSAO = '3.0';
+const VERSAO = '3.1';
 const PROD_N = 14;
 const PAC_N = 2;
 const SENHA_INICIAL = '1234';
@@ -418,7 +418,32 @@ function renderVenda() {
     b.classList.toggle('desligado', !ok);
   }
   $('ultimoPedido').textContent = E.ultimoPedido || '';
+  renderGraficoArtigos();
   renderPedido();
+}
+
+// Gráfico do ecrã Venda: senhas vendidas no turno por artigo (atualiza a cada impressão, anulação e fecho)
+function renderGraficoArtigos() {
+  const caixa = $('graficoArtigos');
+  if (!caixa) return;
+  const m = new Map();
+  for (const l of E.registo) {
+    if (l.fecho || l.estado !== 'Válida') continue;
+    const a = m.get(l.produto) || { nome: l.produto, prodN: l.prodN, senhas: 0, valor: 0 };
+    a.senhas += l.qtd; a.valor = r2(a.valor + l.valor);
+    m.set(l.produto, a);
+  }
+  const lista = Array.from(m.values()).sort((a, b) => b.senhas - a.senhas || b.valor - a.valor);
+  if (!lista.length) { caixa.innerHTML = '<div class="ga-vazio">Ainda não há vendas neste turno. O gráfico aparece com o primeiro pedido impresso.</div>'; return; }
+  const max = lista[0].senhas || 1;
+  const cor = a => {
+    const i = a.prodN - 1;
+    return prod(i) && prod(i).nome === a.nome ? corProd(i) : '#7f8c8d';
+  };
+  caixa.innerHTML = lista.map(a =>
+    `<div class="ga-linha"><div class="ga-nome">${esc(a.nome)}</div>` +
+    `<div class="ga-pista"><div class="ga-barra" style="width:${Math.max(1.5, a.senhas / max * 100)}%;background:${cor(a)}"></div></div>` +
+    `<div class="ga-valor"><b>${a.senhas}</b> ${a.senhas === 1 ? 'senha' : 'senhas'} · ${euro(a.valor)}</div></div>`).join('');
 }
 
 // Letra dos botões: a palavra mais comprida tem de caber numa linha

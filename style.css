@@ -255,3 +255,29 @@ details.chave textarea { width: 100%; font: 12px Consolas, monospace; padding: 8
 }
 .definicoes { grid-template-columns: minmax(0, 1fr); }
 .definicoes .bloco { min-width: 0; overflow-x: auto; }
+
+/* ---------- v3.1: gráfico por artigo e pedido mais alto ---------- */
+.painel { align-items: stretch; }
+.coluna-esq { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
+.cartao-grafico { padding: 12px 14px 14px; }
+.grafico-cab { font-size: 11px; font-weight: bold; color: var(--cinza); margin-bottom: 10px; }
+.grafico-cab small { font-weight: normal; }
+.ga-linha { display: grid; grid-template-columns: 150px minmax(0, 1fr) 170px; align-items: center; gap: 10px; padding: 4px 0; }
+.ga-nome { font-size: 14px; font-weight: bold; color: #333; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ga-pista { background: #f0f2f4; border-radius: 6px; height: 22px; overflow: hidden; }
+.ga-barra { height: 100%; border-radius: 6px; transition: width .4s; }
+.ga-valor { font-size: 13px; color: #444; white-space: nowrap; text-align: right; }
+.ga-valor b { font-size: 15px; color: var(--escuro); }
+.ga-vazio { color: var(--cinza); font-size: 13px; padding: 10px 0; }
+.cartao-pedido { height: 100%; }
+.cartao-pedido .pedido-lista { flex: 1 1 auto; min-height: 220px; max-height: none; }
+@media (min-width: 1001px) {
+  .cartao-pedido { position: sticky; top: 76px; height: calc(100vh - 92px); max-height: none; }
+  .cartao-pedido .pedido-lista { min-height: 0; overflow-y: auto; }
+}
+@media (max-width: 1000px) {
+  .cartao-pedido { height: auto; }
+}
+@media (max-width: 700px) {
+  .cartao-grafico { display: none; }
+}
