@@ -89,9 +89,45 @@
         <div class="cartao bloco">
           <h2>Impressão das senhas</h2>
           <div class="campos">
+            <label>Como imprimir
+              <select id="defModo">
+                <option value="qz">Direto na impressora térmica (QZ Tray)</option>
+                <option value="browser">Janela de impressão do browser</option>
+              </select>
+            </label>
             <label>Largura do rolo
               <select id="defLargura"><option value="80">80 mm</option><option value="58">58 mm</option></select>
             </label>
+          </div>
+          <div id="blocoQZ">
+            <div class="campos">
+              <label>Impressora
+                <select id="defImpressora"></select>
+              </label>
+              <label>Avanço do papel antes do corte (linhas) <input id="defAvanco" type="number" min="0" max="10" step="1"></label>
+              <label>Modo da imagem
+                <select id="defImgModo">
+                  <option value="gs_v_0">Raster (recomendado)</option>
+                  <option value="esc_asterisk">Compatível (impressoras antigas)</option>
+                </select>
+              </label>
+            </div>
+            <p class="estado-qz" id="qzEstado">QZ Tray: ainda não verificado.</p>
+            <div class="botoes-linha" style="margin-bottom:12px">
+              <button class="btn cinza-escuro" data-acao="procurarImpressoras">PROCURAR IMPRESSORAS</button>
+            </div>
+            <details class="chave">
+              <summary>Chave de impressão (para o QZ Tray não pedir autorização)</summary>
+              <p class="nota">Cole aqui o texto completo do ficheiro <b>chave-impressao.txt</b> (de «-----BEGIN PRIVATE KEY-----» a «-----END PRIVATE KEY-----»). A chave fica só neste computador.</p>
+              <textarea id="defChave" rows="6" spellcheck="false" placeholder="-----BEGIN PRIVATE KEY-----"></textarea>
+              <p class="estado-qz" id="chaveEstado"></p>
+              <div class="botoes-linha">
+                <button class="btn azul" data-acao="gravarChave">GRAVAR CHAVE</button>
+                <button class="btn cinza" data-acao="apagarChave">APAGAR CHAVE</button>
+              </div>
+            </details>
+          </div>
+          <div id="blocoBrowser" class="campos">
             <label>Altura de cada senha (mm) <input id="defAltura" type="number" min="25" max="120" step="1"></label>
           </div>
           <div class="logo-linha">
@@ -159,6 +195,7 @@
 <!-- ===================== IMPRESSÃO ===================== -->
 <div id="areaImpressao"></div>
 
+<script src="qz-tray.js"></script>
 <script src="app.js"></script>
 </body>
 </html>

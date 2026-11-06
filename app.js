@@ -5,10 +5,42 @@
    A estrutura dos dados está pensada para passar mais tarde ao Firebase.
    ===================================================================== */
 
-const VERSAO = '1.0';
+const VERSAO = '1.1';
 const PROD_N = 14;
 const PAC_N = 2;
 const SENHA_INICIAL = '1234';
+
+// Certificado público da app (o QZ Tray confia nele através do ficheiro override.crt)
+const CERT_QZ = `-----BEGIN CERTIFICATE-----
+MIIEFTCCAv2gAwIBAgIUP/83/OlvrDgMuXQWklp7JnFpOoYwDQYJKoZIhvcNAQEL
+BQAwgZkxCzAJBgNVBAYTAlBUMQ8wDQYDVQQHDAZBbGZlbmExHDAaBgNVBAoME01v
+dG9jbHViZSBkZSBBbGZlbmExDzANBgNVBAsMBlNlbmhhczEjMCEGA1UEAwwaU2Vu
+aGFzIE1vdG9jbHViZSBkZSBBbGZlbmExJTAjBgkqhkiG9w0BCQEWFnNlbmhhc0Bt
+b3RvY2x1YmUubG9jYWwwHhcNMjYxMTA2MjA1MjEyWhcNNDYxMTAxMjA1MjEyWjCB
+mTELMAkGA1UEBhMCUFQxDzANBgNVBAcMBkFsZmVuYTEcMBoGA1UECgwTTW90b2Ns
+dWJlIGRlIEFsZmVuYTEPMA0GA1UECwwGU2VuaGFzMSMwIQYDVQQDDBpTZW5oYXMg
+TW90b2NsdWJlIGRlIEFsZmVuYTElMCMGCSqGSIb3DQEJARYWc2VuaGFzQG1vdG9j
+bHViZS5sb2NhbDCCASIwDQYJKoZIhvcNAQEBBQADggEPADCCAQoCggEBAJhcyF0O
+gFHxAk3C9sl2qvw4Mt2MZ3ONvRbd1oLNMLp1P9/ss4v/i+IdymjQgZBPqAhviKZT
+h61S0ljId9I9eiG4zJp2mJn/Nhoi5M4BkSf/NCWUdlnGWIcPKNRzMQY/Zj7Ygu0Y
+YasBDWBe0f/3fvhzMNvQ0eHqca+E4f02DEdhFE4aatwFSNn6hFwOQLZCaUwo8ojd
+swhW2QLlElLgfvGiyL1hy0q2cSpdCN3XG/dq2KEFsPLLOxxff/dv76zhJwrB3/qj
+jsjBoBlIhSGe0NIktKYxcFaNf1KvkGpMoT1bzLFcThm/w74ly7G8/dWGDpGZnEWB
+DeHVgErIrScvkAsCAwEAAaNTMFEwHQYDVR0OBBYEFGSn9dI0EZSERzVZ+u3Q8jZf
+pDtuMB8GA1UdIwQYMBaAFGSn9dI0EZSERzVZ+u3Q8jZfpDtuMA8GA1UdEwEB/wQF
+MAMBAf8wDQYJKoZIhvcNAQELBQADggEBAIeUtHBZTdoAzStjtlydtgo5OSltFKEc
+Pwl9OPpxo8BVndE3ihLxPe9XJu5JPUoG5zxUQm4kqBBOn61vKJ4Z3WJ1jV+MGmQg
+wQUw18pllcAA2O3qtSyZ49A7UvapGUVcF5zwmke9e9rBgVjDH+6C/nUpt9gnEeFa
+ItSg5jXZxtf5pgE1+j6K0K+08ZwTYF1MuLqlkiVC7W5M0NJXkTeCPDtf7idNF4i6
+32ggd747elGSf13OFPW9XCH6O2JtURC6sVZvL5ACjciE+1hDxzspUHH+oX10XCsR
+ea3ubs+lUfOXZrJO15vRzpMV0Fg1mqdg4t/YMyevI9g2u6ReKgtWcWs=
+-----END CERTIFICATE-----`;
+
+const CONFIG_PADRAO = {
+  evento: 'Magusto 2026/1', data: '2026-11-04', posto: 'Posto 1',
+  largura: 80, alturaSenha: 45, logo: '', senhaHash: '',
+  modoImpressao: 'qz', impressora: 'BP-T3', avanco: 3, imgModo: 'gs_v_0', chaveQZ: ''
+};
 
 const CORES = {
   'Laranja': '#e67e22', 'Azul': '#2980b9', 'Verde': '#27ae60', 'Vermelho': '#c0392b',
@@ -83,11 +115,7 @@ function estadoInicial() {
   }
   return {
     versaoDados: 1,
-    config: {
-      evento: 'Magusto 2026/1', data: '2026-11-04', posto: 'Posto 1',
-      largura: 80, alturaSenha: 45, logo: '',
-      senhaHash: ''
-    },
+    config: { ...CONFIG_PADRAO },
     pacotes: [{ senhas: 8, valor: 10 }, { senhas: 18, valor: 20 }],
     produtos,
     registo: [],        // uma linha por linha de pedido impressa
@@ -299,6 +327,9 @@ const acoes = {
   // ----- definições -----
   gravarEvento() { gravarEvento(); },
   gravarImpressao() { gravarImpressao(); },
+  procurarImpressoras() { procurarImpressoras(); },
+  gravarChave() { gravarChave(); },
+  apagarChave() { apagarChave(); },
   removerLogo() { removerLogo(); },
   preVisualizar() { preVisualizar(); },
   testeImpressao() { testeImpressao(); },
@@ -497,6 +528,13 @@ async function imprimirPedido() {
   h += `</table><p>Total de senhas a imprimir: <b>${senhas}</b></p><div class="cobrar">A COBRAR: ${euro(total)}</div><p>Receba o dinheiro e confirme para imprimir.</p>`;
   if (!await janela({ titulo: 'Confirmar pedido', html: h, botoes: [{ texto: 'NÃO', classe: 'cinza', valor: false }, { texto: 'SIM, IMPRIMIR', classe: 'verde', valor: true }] })) return;
 
+  // A impressora tem de estar pronta antes de gravar
+  try {
+    await prepararImpressora();
+  } catch (e) {
+    return aviso('O pedido NÃO foi registado.\n\n' + msgErro(e), 'Impressora');
+  }
+
   // 1) Gravar primeiro (uma linha do registo por linha do pedido)
   const agora = new Date();
   const nPed = E.registo.reduce((m, l) => Math.max(m, l.pedido), 0) + 1;
@@ -522,15 +560,190 @@ async function imprimirPedido() {
   renderVenda();
   renderTopo();
 
-  // 2) Imprimir
-  await imprimirSenhas(nomes);
+  // 2) Imprimir (se falhar, o pedido já está registado: tentar outra vez)
+  for (;;) {
+    try {
+      await imprimirSenhas(nomes);
+      break;
+    } catch (e) {
+      const outra = await janela({
+        titulo: 'Impressão',
+        html: `O pedido Nº ${nPed} ficou registado, mas as senhas não saíram.<br><br><i>${esc(msgErro(e))}</i><br><br>` +
+          'Resolva o problema (impressora ligada, com papel, QZ Tray aberto) e carregue em TENTAR OUTRA VEZ.',
+        botoes: [{ texto: 'DESISTIR', classe: 'cinza', valor: false }, { texto: 'TENTAR OUTRA VEZ', classe: 'verde', valor: true }]
+      });
+      if (!outra) {
+        E.ultimoPedido += ' · NÃO IMPRESSO';
+        await guardar();
+        renderVenda();
+        break;
+      }
+    }
+  }
 }
 
 /* =====================================================================
    IMPRESSÃO DAS SENHAS
+   - QZ Tray: a app envia a senha (imagem) diretamente à térmica, em ESC/POS,
+     com o comprimento certo e corte depois de cada senha.
+   - Browser: janela de impressão do browser (uma página por senha).
    ===================================================================== */
 function mmUtil() { return int(E.config.largura) === 58 ? 48 : 72; }
+function pontosLargura() { return mmUtil() * 8; } // 203 ppp = 8 pontos por mm
 
+function msgErro(e) {
+  const m = (e && (e.message || e.toString())) || 'erro desconhecido';
+  if (/Unable to establish connection|failed to connect|websocket|connection/i.test(m))
+    return 'Não foi possível ligar ao QZ Tray. Confirme que o QZ Tray está aberto (ícone junto ao relógio do Windows).';
+  if (/not found|Cannot find printer|printer.*not/i.test(m))
+    return `A impressora «${E.config.impressora}» não foi encontrada. Escolha-a outra vez em DEFINIÇÕES → PROCURAR IMPRESSORAS.`;
+  if (/blocked|rejected|denied/i.test(m))
+    return 'O QZ Tray recusou o pedido. Na janela do QZ Tray carregue em «Allow» (Permitir).';
+  return m;
+}
+
+/* ---------- QZ Tray ---------- */
+let qzConfigurado = false;
+let chaveCripto = null, chaveCriptoTexto = null;
+
+function pemParaBytes(pem) {
+  const b64 = pem.replace(/-----[^-]+-----/g, '').replace(/\s+/g, '');
+  return Uint8Array.from(atob(b64), c => c.charCodeAt(0));
+}
+
+async function importarChave(pem) {
+  return crypto.subtle.importKey('pkcs8', pemParaBytes(pem), { name: 'RSASSA-PKCS1-v1_5', hash: 'SHA-512' }, false, ['sign']);
+}
+
+async function assinar(texto) {
+  if (chaveCriptoTexto !== E.config.chaveQZ) {
+    chaveCripto = await importarChave(E.config.chaveQZ);
+    chaveCriptoTexto = E.config.chaveQZ;
+  }
+  const sig = await crypto.subtle.sign({ name: 'RSASSA-PKCS1-v1_5' }, chaveCripto, new TextEncoder().encode(texto));
+  let s = '';
+  new Uint8Array(sig).forEach(b => { s += String.fromCharCode(b); });
+  return btoa(s);
+}
+
+function configurarQZ() {
+  if (typeof qz === 'undefined') throw new Error('A peça de ligação ao QZ Tray (qz-tray.js) não carregou.');
+  if (qzConfigurado) return;
+  qz.security.setCertificatePromise((resolve) => resolve(E.config.chaveQZ ? CERT_QZ : ''));
+  qz.security.setSignatureAlgorithm('SHA512');
+  qz.security.setSignaturePromise(texto => (resolve, reject) => {
+    if (!E.config.chaveQZ) return resolve('');
+    assinar(texto).then(resolve).catch(reject);
+  });
+  qzConfigurado = true;
+}
+
+async function ligarQZ() {
+  configurarQZ();
+  if (qz.websocket.isActive()) return;
+  await qz.websocket.connect({ retries: 1, delay: 1 });
+}
+
+async function prepararImpressora() {
+  if (E.config.modoImpressao !== 'qz') return;
+  if (!E.config.impressora) throw new Error('Ainda não foi escolhida a impressora (DEFINIÇÕES → PROCURAR IMPRESSORAS).');
+  await ligarQZ();
+}
+
+/* ---------- Desenho da senha (imagem a preto e branco) ---------- */
+function carregarImagem(src) {
+  return new Promise((ok, erro) => {
+    const i = new Image();
+    i.onload = () => ok(i);
+    i.onerror = () => erro(new Error('Não foi possível ler o logótipo.'));
+    i.src = src;
+  });
+}
+
+// Pontilhado Floyd–Steinberg: tons de cinzento em pontos pretos e brancos
+function pontilhar(ctx, w, h) {
+  const img = ctx.getImageData(0, 0, w, h);
+  const d = img.data;
+  const g = new Float32Array(w * h);
+  for (let i = 0; i < w * h; i++) {
+    const a = d[i * 4 + 3] / 255;
+    g[i] = (0.299 * d[i * 4] + 0.587 * d[i * 4 + 1] + 0.114 * d[i * 4 + 2]) * a + 255 * (1 - a);
+  }
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      const i = y * w + x;
+      const novo = g[i] < 128 ? 0 : 255;
+      const erro = g[i] - novo;
+      g[i] = novo;
+      if (x + 1 < w) g[i + 1] += erro * 7 / 16;
+      if (y + 1 < h) {
+        if (x > 0) g[i + w - 1] += erro * 3 / 16;
+        g[i + w] += erro * 5 / 16;
+        if (x + 1 < w) g[i + w + 1] += erro * 1 / 16;
+      }
+    }
+  }
+  for (let i = 0; i < w * h; i++) {
+    const v = g[i] < 128 ? 0 : 255;
+    d[i * 4] = d[i * 4 + 1] = d[i * 4 + 2] = v;
+    d[i * 4 + 3] = 255;
+  }
+  ctx.putImageData(img, 0, 0);
+}
+
+// Senha = logótipo (2,5 cm de altura) + nome do produto (encolhe se não couber)
+async function desenharSenha(nome) {
+  const W = pontosLargura();
+  const txt = nome.toUpperCase();
+  const logo = E.config.logo ? await carregarImagem(E.config.logo) : null;
+  let lw = 0, lh = 0;
+  if (logo) {
+    lh = 200; // 25 mm × 8 pontos/mm
+    lw = Math.round(logo.width * lh / logo.height);
+    if (lw > W - 16) { lw = W - 16; lh = Math.round(logo.height * lw / logo.width); }
+  }
+  const c = document.createElement('canvas');
+  const ctx = c.getContext('2d');
+  let fs = 50; // ≈ 18 pt
+  ctx.font = `bold ${fs}px Arial, Helvetica, sans-serif`;
+  const tw = ctx.measureText(txt).width;
+  if (tw > W - 16) fs = Math.max(16, Math.floor(fs * (W - 16) / tw));
+  const H = 8 + (logo ? lh + 12 : 0) + Math.round(fs * 1.2) + 8;
+  c.width = W;
+  c.height = H;
+  ctx.fillStyle = '#fff';
+  ctx.fillRect(0, 0, W, H);
+  let y = 8;
+  if (logo) { ctx.drawImage(logo, Math.round((W - lw) / 2), y, lw, lh); y += lh + 12; }
+  ctx.fillStyle = '#000';
+  ctx.font = `bold ${fs}px Arial, Helvetica, sans-serif`;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'top';
+  ctx.fillText(txt, W / 2, y + Math.round(fs * 0.08));
+  pontilhar(ctx, W, H);
+  return c.toDataURL('image/png');
+}
+
+async function imprimirQZ(nomes) {
+  await prepararImpressora();
+  const cfg = qz.configs.create(E.config.impressora);
+  const avanco = Math.min(10, Math.max(0, int(E.config.avanco)));
+  const cache = {};
+  const dados = [];
+  for (const n of nomes) {
+    if (!cache[n]) cache[n] = (await desenharSenha(n)).split(',')[1];
+    dados.push('\x1B\x40');                                   // iniciar
+    dados.push({
+      type: 'raw', format: 'image', flavor: 'base64', data: cache[n],
+      options: { language: 'ESCPOS', dotDensity: 'double', imageEncoding: E.config.imgModo || 'gs_v_0' }
+    });
+    dados.push('\x1B\x64' + String.fromCharCode(avanco));    // avançar n linhas
+    dados.push('\x1D\x56\x42\x00');                           // cortar
+  }
+  await qz.print(cfg, dados);
+}
+
+/* ---------- Impressão pelo browser ---------- */
 function letraNome(nome) {
   const max = 18; // pt
   const c = letraNome.c || (letraNome.c = document.createElement('canvas').getContext('2d'));
@@ -567,8 +780,7 @@ function definirPagina() {
   $('estiloPagina').textContent = `@page { size: ${int(E.config.largura)}mm ${int(E.config.alturaSenha)}mm; margin: 0; }`;
 }
 
-async function imprimirSenhas(nomes) {
-  if (!nomes.length) return;
+async function imprimirBrowser(nomes) {
   definirPagina();
   const area = $('areaImpressao');
   area.innerHTML = '';
@@ -580,6 +792,13 @@ async function imprimirSenhas(nomes) {
   area.innerHTML = '';
 }
 
+// Imprime uma senha por nome. Em caso de erro, lança-o (quem chama decide o que fazer).
+async function imprimirSenhas(nomes) {
+  if (!nomes.length) return;
+  if (E.config.modoImpressao === 'qz') await imprimirQZ(nomes);
+  else await imprimirBrowser(nomes);
+}
+
 function nomeMaisComprido() {
   let m = 'TESTE';
   for (let i = 0; i < PROD_N; i++) if (prodExiste(i) && prod(i).nome.length > m.length) m = prod(i).nome;
@@ -587,19 +806,94 @@ function nomeMaisComprido() {
 }
 
 async function preVisualizar() {
-  const d = criarSenha(nomeMaisComprido());
-  const caixa = document.createElement('div');
-  caixa.className = 'previa';
-  caixa.appendChild(d);
-  await janela({
-    titulo: 'Pré-visualização da senha',
-    html: caixa.outerHTML + `<p class="nota">Rolo de ${int(E.config.largura)} mm · senha com ${int(E.config.alturaSenha)} mm de altura · nome mais comprido dos produtos.</p>`
-  });
+  let html;
+  if (E.config.modoImpressao === 'qz') {
+    const src = await desenharSenha(nomeMaisComprido());
+    html = `<div class="previa"><img class="raster" src="${src}" alt=""></div>` +
+      `<p class="nota">Assim sai na térmica (rolo de ${int(E.config.largura)} mm, pontos a preto e branco). Nome mais comprido dos produtos.</p>`;
+  } else {
+    const caixa = document.createElement('div');
+    caixa.className = 'previa';
+    caixa.appendChild(criarSenha(nomeMaisComprido()));
+    html = caixa.outerHTML + `<p class="nota">Rolo de ${int(E.config.largura)} mm · senha com ${int(E.config.alturaSenha)} mm de altura · nome mais comprido dos produtos.</p>`;
+  }
+  await janela({ titulo: 'Pré-visualização da senha', html });
 }
 
 async function testeImpressao() {
   if (!await confirmar('Imprimir uma senha de teste?<br>Não fica registada nem gasta numeração.', 'Teste de impressão')) return;
-  await imprimirSenhas([nomeMaisComprido()]);
+  try {
+    await imprimirSenhas([nomeMaisComprido()]);
+  } catch (e) {
+    aviso('A impressão falhou.\n\n' + msgErro(e), 'Teste de impressão');
+  }
+}
+
+/* ---------- Definições da impressora (QZ Tray) ---------- */
+function estadoQZ(texto, classe) {
+  const el = $('qzEstado');
+  el.textContent = texto;
+  el.className = 'estado-qz' + (classe ? ' ' + classe : '');
+}
+
+function preencherImpressoras(lista) {
+  const sel = $('defImpressora');
+  const atual = E.config.impressora;
+  const nomes = lista.slice();
+  if (atual && !nomes.includes(atual)) nomes.unshift(atual);
+  sel.innerHTML = nomes.map(n => `<option>${esc(n)}</option>`).join('') || '<option value="">(nenhuma)</option>';
+  if (atual) sel.value = atual;
+}
+
+async function procurarImpressoras() {
+  estadoQZ('A ligar ao QZ Tray…');
+  try {
+    await ligarQZ();
+    const lista = await qz.printers.find();
+    const v = qz.websocket.getConnectionInfo ? qz.websocket.getConnectionInfo() : null;
+    preencherImpressoras(Array.isArray(lista) ? lista : [lista]);
+    estadoQZ(`QZ Tray ligado${v && v.version ? ' (versão ' + v.version + ')' : ''} · ${Array.isArray(lista) ? lista.length : 1} impressora(s) encontradas. Escolha a térmica e carregue em GRAVAR IMPRESSÃO.`, 'ok');
+  } catch (e) {
+    estadoQZ(msgErro(e), 'erro');
+  }
+}
+
+function renderChave() {
+  $('defChave').value = '';
+  const el = $('chaveEstado');
+  el.textContent = E.config.chaveQZ ? 'Chave instalada neste computador.' : 'Sem chave: o QZ Tray vai pedir autorização («Allow») ao imprimir.';
+  el.className = 'estado-qz' + (E.config.chaveQZ ? ' ok' : '');
+}
+
+async function gravarChave() {
+  const pem = $('defChave').value.trim();
+  if (!/-----BEGIN PRIVATE KEY-----[\s\S]+-----END PRIVATE KEY-----/.test(pem))
+    return aviso('O texto não parece uma chave válida.\nCole o conteúdo completo do ficheiro chave-impressao.txt, incluindo as linhas BEGIN e END.');
+  try {
+    await importarChave(pem);
+  } catch (e) {
+    return aviso('A chave não é válida: ' + msgErro(e));
+  }
+  E.config.chaveQZ = pem;
+  await guardar();
+  renderChave();
+  if (typeof qz !== 'undefined' && qz.websocket.isActive()) { try { await qz.websocket.disconnect(); } catch (e) { /* nada */ } }
+  aviso('Chave gravada neste computador.');
+}
+
+async function apagarChave() {
+  if (!E.config.chaveQZ) return;
+  if (!await confirmar('Apagar a chave de impressão deste computador?')) return;
+  E.config.chaveQZ = '';
+  await guardar();
+  renderChave();
+  if (typeof qz !== 'undefined' && qz.websocket.isActive()) { try { await qz.websocket.disconnect(); } catch (e) { /* nada */ } }
+}
+
+function mostrarBlocosImpressao() {
+  const qzModo = $('defModo').value === 'qz';
+  $('blocoQZ').hidden = !qzModo;
+  $('blocoBrowser').hidden = qzModo;
 }
 
 /* =====================================================================
@@ -612,6 +906,12 @@ function renderDefinicoes() {
   $('defPosto').value = c.posto;
   $('defLargura').value = String(c.largura);
   $('defAltura').value = c.alturaSenha;
+  $('defModo').value = c.modoImpressao;
+  $('defAvanco').value = c.avanco;
+  $('defImgModo').value = c.imgModo;
+  preencherImpressoras([]);
+  mostrarBlocosImpressao();
+  renderChave();
   renderLogoDef();
 
   let h = '';
@@ -680,11 +980,19 @@ async function gravarEvento() {
 async function gravarImpressao() {
   const alt = int($('defAltura').value);
   if (alt < 25 || alt > 120) return aviso('A altura da senha tem de estar entre 25 e 120 mm.');
+  const av = int($('defAvanco').value);
+  if (av < 0 || av > 10) return aviso('O avanço do papel tem de estar entre 0 e 10 linhas.');
+  E.config.modoImpressao = $('defModo').value;
   E.config.largura = int($('defLargura').value);
   E.config.alturaSenha = alt;
+  E.config.impressora = $('defImpressora').value || E.config.impressora;
+  E.config.avanco = av;
+  E.config.imgModo = $('defImgModo').value;
   await guardar();
-  aviso('Impressão gravada.');
+  aviso('Impressão gravada.' + (E.config.modoImpressao === 'qz' ? '\nImpressora: ' + E.config.impressora : ''));
 }
+
+$('defModo').addEventListener('change', mostrarBlocosImpressao);
 
 $('defLogoFicheiro').addEventListener('change', async e => {
   const f = e.target.files[0];
@@ -799,6 +1107,8 @@ async function arrancar() {
     E = estadoInicial();
     E.config.senhaHash = await hash(SENHA_INICIAL);
     await guardar();
+  } else {
+    E.config = { ...CONFIG_PADRAO, ...E.config };   // campos novos das versões seguintes
   }
   if (navigator.storage && navigator.storage.persist) navigator.storage.persist().catch(() => {});
   if ('serviceWorker' in navigator && location.protocol !== 'file:') navigator.serviceWorker.register('sw.js').catch(() => {});
