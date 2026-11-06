@@ -5,7 +5,7 @@
    A estrutura dos dados está pensada para passar mais tarde ao Firebase.
    ===================================================================== */
 
-const VERSAO = '1.2';
+const VERSAO = '2.0';
 const PROD_N = 14;
 const PAC_N = 2;
 const SENHA_INICIAL = '1234';
@@ -270,13 +270,15 @@ function mostrar(qual) {
   $('topo').hidden = qual === 'entrada';
   $('ecraVenda').hidden = qual !== 'venda';
   $('ecraDefinicoes').hidden = qual !== 'definicoes';
+  $('ecraTurno').hidden = qual !== 'turno';
   $('navVenda').classList.toggle('ativo', qual === 'venda');
+  $('navTurno').classList.toggle('ativo', qual === 'turno');
   $('navDefinicoes').classList.toggle('ativo', qual === 'definicoes');
-  $('navVenda').hidden = modo !== 'ADMIN';
   $('navDefinicoes').hidden = modo !== 'ADMIN';
   $('navModo').textContent = modo === 'ADMIN' ? 'MODO: ADMIN' : 'MODO: VENDEDOR';
   if (qual === 'venda') renderVenda();
   if (qual === 'definicoes') renderDefinicoes();
+  if (qual === 'turno') renderTurno();
   if (qual === 'entrada') renderEntrada();
   renderTopo();
   window.scrollTo(0, 0);
@@ -301,6 +303,11 @@ const acoes = {
   },
   irVenda() { mostrar('venda'); },
   irDefinicoes() { if (modo === 'ADMIN') mostrar('definicoes'); },
+  irTurno() { mostrar('turno'); },
+  fecharCaixa() { fecharCaixa(); },
+  anular() { anularVenda(); },
+  reimprimir() { reimprimirPedido(); },
+  reimprimirTalao(el) { reimprimirTalao(int(el.dataset.n)); },
   async trocarModo() {
     if (modo === 'ADMIN') {
       if (await confirmar('Passar para o modo <b>VENDEDOR</b>?<br>Só fica disponível o ecrã de venda.', 'Modo')) {
@@ -1132,6 +1139,398 @@ async function mudarPalavraPasse() {
   await guardar();
   $('pwAtual').value = $('pwNova').value = $('pwNova2').value = '';
   aviso('Palavra-passe mudada.\nGuarde-a num local seguro: sem ela não se entra como administrador.');
+}
+
+/* =====================================================================
+   FASE 2 — escolher numa lista, anular, reimprimir, turno, fecho, talão
+   ===================================================================== */
+const ORDEM_FMT = { 'Pacote 1': 1, 'Pacote 2': 2, 'Avulso': 3, 'Normal': 4, 'Oferta': 5 };
+const ordemFmt = f => ORDEM_FMT[f] || 9;
+const dataHoraPT = iso => { const d = new Date(iso); return d.toLocaleDateString('pt-PT') + ' ' + horaPT(d); };
+
+// Janela com uma lista de opções para tocar (devolve o valor escolhido ou null)
+function escolherDaLista(titulo, texto, itens) {
+  return new Promise(ok => {
+    $('modalTitulo').textContent = titulo;
+    $('modalInput').hidden = true;
+    let h = texto ? `<p>${texto}</p>` : '';
+    h += '<div class="lista-escolha">';
+    itens.forEach((it, n) => { h += `<button class="item-escolha" data-n="${n}">${it.html}</button>`; });
+    $('modalCorpo').innerHTML = h + '</div>';
+    const caixa = $('modalBotoes');
+    caixa.innerHTML = '<button class="btn cinza">CANCELAR</button>';
+    const fechar = v => {
+      $('fundoModal').hidden = true;
+      document.removeEventListener('keydown', teclas);
+      $('modalCorpo').onclick = null;
+      ok(v);
+    };
+    const teclas = e => { if (e.key === 'Escape') fechar(null); };
+    caixa.firstChild.onclick = () => fechar(null);
+    $('modalCorpo').onclick = e => {
+      const b = e.target.closest('.item-escolha');
+      if (b) fechar(itens[int(b.dataset.n)].valor);
+    };
+    document.addEventListener('keydown', teclas);
+    $('fundoModal').hidden = false;
+  });
+}
+
+const linhasTurno = () => E.registo.filter(l => !l.fecho);
+const valida = l => l.estado === 'Válida';
+
+function pedidosDe(linhas) {
+  const m = new Map();
+  for (const l of linhas) {
+    if (!m.has(l.pedido)) m.set(l.pedido, []);
+    m.get(l.pedido).push(l);
+  }
+  return Array.from(m.entries()).sort((a, b) => b[0] - a[0]);   // mais recente primeiro
+}
+
+function resumoPedido(n, ls) {
+  const sen = ls.reduce((s, l) => s + l.qtd, 0), val = r2(ls.reduce((s, l) => s + l.valor, 0));
+  const prods = Array.from(new Set(ls.map(l => l.produto.toUpperCase()))).join(', ');
+  return `<b>Pedido ${n}</b> · ${horaPT(new Date(ls[0].data))} · ${esc(prods)}<br><small>${ls.length} linha(s) · ${sen} senhas · ${euro(val)}</small>`;
+}
+
+/* ---------- ANULAR ---------- */
+async function anularVenda() {
+  if (E.pedido.length) return aviso('Há um pedido por imprimir.\nCarregue em IMPRIMIR PEDIDO ou em LIMPAR antes de anular.');
+  if (modo !== 'ADMIN' && !await pedirPalavraPasse('Anular uma venda pede a palavra-passe de administrador.')) return;
+  const vivas = linhasTurno().filter(valida);
+  if (!vivas.length) return aviso('Não há vendas válidas no turno atual para anular.\n(Depois do fecho de caixa já não se pode anular.)', 'Anular');
+
+  const tipo = await janela({
+    titulo: 'Anular', html: 'O que quer anular?',
+    botoes: [{ texto: 'CANCELAR', classe: 'cinza', valor: null }, { texto: 'SÓ UMA LINHA', classe: 'azul', valor: 'linha' },
+      { texto: 'PEDIDO INTEIRO', classe: 'vermelho', valor: 'pedido' }]
+  });
+  if (!tipo) return;
+
+  let alvo, texto;
+  if (tipo === 'pedido') {
+    const lista = pedidosDe(vivas).slice(0, 15);
+    const n = await escolherDaLista('Anular pedido', 'Toque no pedido a anular (os 15 mais recentes do turno):',
+      lista.map(([n, ls]) => ({ html: resumoPedido(n, ls), valor: n })));
+    if (n === null) return;
+    alvo = vivas.filter(l => l.pedido === n);
+    texto = `o <b>pedido Nº ${n}</b> (${alvo.length} linha(s))`;
+  } else {
+    const lista = vivas.slice().sort((a, b) => b.venda - a.venda).slice(0, 15);
+    const v = await escolherDaLista('Anular uma linha', 'Toque na linha a anular (as 15 mais recentes do turno):',
+      lista.map(l => ({
+        html: `<b>${esc(l.produto.toUpperCase())}</b> · ${fmtCurto(l.formato)} · ${l.qtd} senhas · ${euro(l.valor)}<br>` +
+          `<small>Pedido ${l.pedido} · venda ${l.venda} · ${horaPT(new Date(l.data))} · ${esc(l.ini)} a ${esc(l.fim)}</small>`,
+        valor: l.venda
+      })));
+    if (v === null) return;
+    alvo = vivas.filter(l => l.venda === v);
+    texto = `a <b>linha ${v}</b> (${esc(alvo[0].produto.toUpperCase())}, ${alvo[0].qtd} senhas, pedido ${alvo[0].pedido})`;
+  }
+  const devolver = r2(alvo.reduce((s, l) => s + l.valor, 0));
+  if (!await confirmar(`Anular ${texto}?<br><br><span class="cobrar">DEVOLVER: ${euro(devolver)}</span><br><br>` +
+    'As senhas destas linhas deixam de contar no turno.', 'Confirmar anulação', 'SIM, ANULAR', 'NÃO')) return;
+
+  const agora = new Date().toISOString();
+  for (const l of alvo) { l.estado = 'Anulada'; l.anuladaEm = agora; }
+  E.ultimoPedido = `${tipo === 'pedido' ? 'Pedido Nº ' + alvo[0].pedido : 'Linha ' + alvo[0].venda} ANULADO às ${horaPT(new Date())} · devolver ${euro(devolver)}`;
+  await guardar();
+  renderVenda();
+  renderTopo();
+  aviso(`Anulação feita.\nDevolver ao cliente: ${euro(devolver)}\nRecolha as senhas.`, 'Anular');
+}
+
+/* ---------- REIMPRIMIR (pedido inteiro, mesmos números) ---------- */
+async function reimprimirPedido() {
+  const vivas = E.registo.filter(valida);
+  if (!vivas.length) return aviso('Ainda não há pedidos para reimprimir.');
+  const lista = pedidosDe(vivas).slice(0, 15);
+  const n = await escolherDaLista('Reimprimir pedido', 'Toque no pedido a reimprimir (os 15 mais recentes). As senhas saem com os mesmos números.',
+    lista.map(([n, ls]) => ({ html: resumoPedido(n, ls), valor: n })));
+  if (n === null) return;
+  const ls = vivas.filter(l => l.pedido === n);
+  const nomes = [];
+  for (const l of ls) for (let s = 0; s < l.qtd; s++) nomes.push(l.produto);
+  if (!await confirmar(`Reimprimir as <b>${nomes.length}</b> senhas do pedido Nº ${n}?`, 'Reimprimir')) return;
+  try {
+    await imprimirSenhas(nomes);
+  } catch (e) {
+    return aviso('A impressão falhou.\n\n' + msgErro(e), 'Reimprimir');
+  }
+  const agora = new Date().toISOString();
+  for (const l of ls) { l.reimpressoes = (l.reimpressoes || 0) + 1; l.reimpressoEm = agora; }
+  E.ultimoPedido = `Pedido Nº ${n} REIMPRESSO às ${horaPT(new Date())} · ${nomes.length} senhas`;
+  await guardar();
+  renderVenda();
+}
+
+/* ---------- TOTAIS (turno e fecho) ---------- */
+function calcularTotais(linhas) {
+  const det = new Map();
+  const t = { senhas: 0, valor: 0, desconto: 0, p1: 0, p2: 0, avulso: 0, ofertas: 0, anuladas: 0, valorAnulado: 0,
+    pedidos: new Set(), vendaIni: 0, vendaFim: 0, porHora: new Map() };
+  for (const l of linhas) {
+    if (!t.vendaIni || l.venda < t.vendaIni) t.vendaIni = l.venda;
+    if (l.venda > t.vendaFim) t.vendaFim = l.venda;
+    const k = l.produto + '|' + l.formato;
+    if (!det.has(k)) det.set(k, { produto: l.produto, prodN: l.prodN, formato: l.formato, preco: l.preco, senhas: 0, valor: 0, desconto: 0, anuladas: 0, valorAnulado: 0 });
+    const d = det.get(k);
+    if (valida(l)) {
+      d.senhas += l.qtd; d.valor = r2(d.valor + l.valor); d.desconto = r2(d.desconto + l.desconto); d.preco = l.preco;
+      t.senhas += l.qtd; t.valor += l.valor; t.desconto += l.desconto; t.pedidos.add(l.pedido);
+      if (l.formato === 'Pacote 1') t.p1 += l.valor;
+      else if (l.formato === 'Pacote 2') t.p2 += l.valor;
+      else if (l.formato === 'Oferta') t.ofertas += l.qtd;
+      else t.avulso += l.valor;
+      const hb = Math.floor(new Date(l.data).getTime() / 3600000);
+      const ph = t.porHora.get(hb) || { senhas: 0, valor: 0 };
+      ph.senhas += l.qtd; ph.valor = r2(ph.valor + l.valor);
+      t.porHora.set(hb, ph);
+    } else {
+      d.anuladas += 1; d.valorAnulado = r2(d.valorAnulado + l.valor);
+      t.anuladas += 1; t.valorAnulado += l.valor;
+    }
+  }
+  const detalhe = Array.from(det.values()).sort((a, b) => (a.prodN - b.prodN) || (ordemFmt(a.formato) - ordemFmt(b.formato)));
+  // horas seguidas do primeiro ao último bloco (com zeros)
+  const horas = [];
+  if (t.porHora.size) {
+    const ks = Array.from(t.porHora.keys());
+    for (let h = Math.min(...ks); h <= Math.max(...ks); h++) {
+      const v = t.porHora.get(h) || { senhas: 0, valor: 0 };
+      horas.push({ inicio: new Date(h * 3600000).toISOString(), senhas: v.senhas, valor: v.valor });
+    }
+  }
+  return {
+    senhas: t.senhas, valor: r2(t.valor), desconto: r2(t.desconto), semDesconto: r2(t.valor + t.desconto),
+    p1: r2(t.p1), p2: r2(t.p2), avulso: r2(t.avulso), ofertas: t.ofertas,
+    anuladas: t.anuladas, valorAnulado: r2(t.valorAnulado), pedidos: t.pedidos.size,
+    vendaIni: t.vendaIni, vendaFim: t.vendaFim, detalhe, horas
+  };
+}
+
+/* ---------- Gráfico de barras (SVG) ---------- */
+function graficoBarras(horas, chave, titulo, fmt, cor) {
+  if (!horas.length) return `<div class="grafico vazio">${esc(titulo)}: ainda sem vendas.</div>`;
+  const W = 640, H = 230, m = { e: 54, d: 12, t: 30, b: 34 };
+  const iw = W - m.e - m.d, ih = H - m.t - m.b;
+  const max = Math.max(1, ...horas.map(h => h[chave]));
+  const passo = (() => { const bruto = max / 4, p = Math.pow(10, Math.floor(Math.log10(bruto))); const n = bruto / p; return (n <= 1 ? 1 : n <= 2 ? 2 : n <= 5 ? 5 : 10) * p; })();
+  const topo = Math.ceil(max / passo) * passo;
+  const bw = iw / horas.length;
+  let s = `<svg viewBox="0 0 ${W} ${H}" class="grafico" role="img" aria-label="${esc(titulo)}">`;
+  s += `<text x="${m.e}" y="18" class="g-titulo">${esc(titulo)}</text>`;
+  for (let v = 0; v <= topo + 1e-9; v += passo) {
+    const y = m.t + ih - (v / topo) * ih;
+    s += `<line x1="${m.e}" x2="${W - m.d}" y1="${y}" y2="${y}" class="g-grelha"/>`;
+    s += `<text x="${m.e - 6}" y="${y + 4}" class="g-eixo" text-anchor="end">${fmt(v)}</text>`;
+  }
+  horas.forEach((h, i) => {
+    const v = h[chave], bh = (v / topo) * ih, x = m.e + i * bw + bw * 0.15, y = m.t + ih - bh;
+    s += `<rect x="${x}" y="${y}" width="${bw * 0.7}" height="${bh}" rx="3" fill="${cor}"><title>${horaPT(new Date(h.inicio))}: ${fmt(v)}</title></rect>`;
+    if (v > 0 && horas.length <= 14) s += `<text x="${x + bw * 0.35}" y="${y - 4}" class="g-valor" text-anchor="middle">${fmt(v)}</text>`;
+    const passoRotulo = Math.ceil(horas.length / 12);
+    if (i % passoRotulo === 0) s += `<text x="${x + bw * 0.35}" y="${H - 12}" class="g-eixo" text-anchor="middle">${new Date(h.inicio).getHours()}h</text>`;
+  });
+  return s + '</svg>';
+}
+
+/* ---------- ECRÃ TURNO ---------- */
+function renderTurno() {
+  const t = calcularTotais(linhasTurno());
+  const cartao = (rot, val, cls = '') => `<div class="kpi ${cls}"><div class="kpi-rot">${rot}</div><div class="kpi-val">${val}</div></div>`;
+  let h = '<div class="kpis">' +
+    cartao('Valor em caixa', euro(t.valor), 'destaque') +
+    cartao('Senhas', t.senhas) + cartao('Pedidos', t.pedidos) +
+    cartao('Pacote 1', euro(t.p1)) + cartao('Pacote 2', euro(t.p2)) + cartao('Avulso / normal', euro(t.avulso)) +
+    cartao('Ofertas', t.ofertas + (t.ofertas === 1 ? ' senha' : ' senhas')) + cartao('Desconto', euro(t.desconto)) +
+    cartao('Anuladas', `${t.anuladas} · ${euro(t.valorAnulado)}`) + '</div>';
+
+  h += '<div class="turno-grelha"><div class="cartao"><h2>Turno atual por produto <small>(desde o último fecho)</small></h2>';
+  if (!t.detalhe.length) h += '<p class="nota">Ainda não há vendas neste turno.</p>';
+  else {
+    h += '<table class="tabela tab-turno"><thead><tr><th>Produto</th><th>Tipo</th><th>Senhas</th><th>Valor</th><th>Desconto</th><th>Anuladas</th></tr></thead><tbody>';
+    for (const d of t.detalhe) {
+      h += `<tr><td class="esq">${esc(d.produto)}</td><td>${esc(d.formato)}</td><td>${d.senhas}</td><td>${euro(d.valor)}</td><td>${euro(d.desconto)}</td><td>${d.anuladas ? d.anuladas + ' · ' + euro(d.valorAnulado) : ''}</td></tr>`;
+    }
+    h += `<tr class="total"><td class="esq">Total</td><td></td><td>${t.senhas}</td><td>${euro(t.valor)}</td><td>${euro(t.desconto)}</td><td>${t.anuladas ? t.anuladas + ' · ' + euro(t.valorAnulado) : ''}</td></tr></tbody></table>`;
+  }
+  h += '</div><div class="cartao"><h2>Vendas por hora</h2>' +
+    graficoBarras(t.horas, 'valor', 'Euros por hora', v => euroCurto(v), '#2980b9') +
+    graficoBarras(t.horas, 'senhas', 'Senhas por hora', v => String(Math.round(v)), '#e67e22') + '</div></div>';
+
+  // fechos deste evento
+  h += '<div class="cartao"><h2>Fechos de caixa deste evento</h2>';
+  if (!E.fechos.length) h += '<p class="nota">Ainda não foi feito nenhum fecho.</p>';
+  else {
+    h += '<table class="tabela tab-turno"><thead><tr><th>Nº</th><th>Data/hora</th><th>Senhas</th><th>Pacote 1</th><th>Pacote 2</th><th>Avulso</th><th>Ofertas</th><th>Em caixa</th><th></th></tr></thead><tbody>';
+    for (const f of E.fechos.slice().reverse()) {
+      h += `<tr><td>${f.num}</td><td>${dataHoraPT(f.data)}</td><td>${f.senhas}</td><td>${euro(f.p1)}</td><td>${euro(f.p2)}</td><td>${euro(f.avulso)}</td><td>${f.ofertas}</td><td><b>${euro(f.valor)}</b></td>` +
+        `<td><button class="btn cinza-escuro pequeno" data-acao="reimprimirTalao" data-n="${f.num}">TALÃO</button></td></tr>`;
+    }
+    h += '</tbody></table>';
+  }
+  h += '</div>';
+  $('turnoConteudo').innerHTML = h;
+}
+
+/* ---------- FECHO DE CAIXA ---------- */
+async function fecharCaixa() {
+  if (E.pedido.length) return aviso('Há um pedido por imprimir.\nCarregue em IMPRIMIR PEDIDO ou em LIMPAR antes de fazer o fecho.', 'Fecho de caixa');
+  const linhas = linhasTurno();
+  if (!linhas.length) return aviso('Não há vendas no turno atual para fechar.', 'Fecho de caixa');
+  const t = calcularTotais(linhas);
+
+  let h = `<p>Vendas Nº ${t.vendaIni} a ${t.vendaFim} · ${t.pedidos} pedido(s)</p><table class="resumo">`;
+  for (const d of t.detalhe) if (d.senhas > 0)
+    h += `<tr><td><b>${esc(d.produto.toUpperCase())}</b> · ${esc(d.formato)}</td><td class="num">${d.senhas}</td><td class="num">${euro(d.valor)}</td></tr>`;
+  h += `</table><table class="resumo apurado">
+    <tr><td>Pacote 1</td><td class="num">${euro(t.p1)}</td></tr>
+    <tr><td>Pacote 2</td><td class="num">${euro(t.p2)}</td></tr>
+    <tr><td>Avulso / normal</td><td class="num">${euro(t.avulso)}</td></tr>
+    <tr><td>Ofertas</td><td class="num">${t.ofertas} senha(s)</td></tr>
+    <tr><td>Desconto concedido</td><td class="num">${euro(t.desconto)}</td></tr>
+    <tr><td>Anuladas</td><td class="num">${t.anuladas} · ${euro(t.valorAnulado)}</td></tr></table>
+    <div class="cobrar">VALOR EM CAIXA: ${euro(t.valor)}</div>
+    <p>Conte o dinheiro: deve bater com o valor em caixa.<br>Depois do fecho, as vendas deste turno já não podem ser anuladas.</p>`;
+  if (!await janela({ titulo: 'Fecho de caixa', html: h, botoes: [{ texto: 'NÃO', classe: 'cinza', valor: false }, { texto: 'FAZER O FECHO', classe: 'verde', valor: true }] })) return;
+
+  const num = E.fechos.reduce((m, f) => Math.max(m, f.num), 0) + 1;
+  const agora = new Date().toISOString();
+  const f = {
+    num, data: agora, evento: E.config.evento, posto: E.config.posto,
+    vendaIni: t.vendaIni, vendaFim: t.vendaFim, pedidos: t.pedidos, senhas: t.senhas,
+    valor: t.valor, desconto: t.desconto, semDesconto: t.semDesconto,
+    p1: t.p1, p2: t.p2, avulso: t.avulso, ofertas: t.ofertas,
+    anuladas: t.anuladas, valorAnulado: t.valorAnulado, horas: t.horas
+  };
+  E.fechos.push(f);
+  for (const d of t.detalhe) E.fechosDetalhe.push({ fecho: num, data: agora, ...d });
+  for (const l of linhas) l.fecho = num;
+  E.ultimoPedido = `Fecho Nº ${num} feito às ${horaPT(new Date())} · em caixa: ${euro(t.valor)}`;
+  await guardar();
+  renderVenda();
+  renderTopo();
+  if (ecra === 'turno') renderTurno();
+
+  if (await confirmar(`Fecho Nº ${num} gravado.<br><br>Imprimir o talão do fecho?`, 'Fecho de caixa')) await imprimirTalao(num);
+}
+
+/* ---------- TALÃO DO FECHO (imagem a preto e branco) ---------- */
+function linhasTalao(f) {
+  const L = [];
+  L.push({ t: 'titulo', a: `FECHO DE CAIXA Nº ${f.num}` });
+  L.push({ t: 'centro', a: f.evento, b: true });
+  L.push({ t: 'centro', a: dataHoraPT(f.data) + (f.posto ? ' · ' + f.posto : '') });
+  L.push({ t: 'centro', a: `Vendas Nº ${f.vendaIni} a ${f.vendaFim} · ${f.pedidos} pedido(s)` });
+  L.push({ t: 'sep' });
+  L.push({ t: 'sub', a: 'PRODUTOS' });
+  const det = E.fechosDetalhe.filter(d => d.fecho === f.num && d.senhas > 0);
+  let ant = null;
+  for (const d of det) {
+    if (d.produto !== ant) { L.push({ t: 'linha', a: d.produto.toUpperCase(), b: true }); ant = d.produto; }
+    const pu = d.preco.toLocaleString('pt-PT', { minimumFractionDigits: 2, maximumFractionDigits: 4 });
+    L.push({ t: 'linha', a: `  ${d.formato}: ${d.senhas} x ${pu}`, d: euro(d.valor), p: true });
+  }
+  if (!det.length) L.push({ t: 'linha', a: 'Sem vendas' });
+  L.push({ t: 'sep' });
+  L.push({ t: 'sub', a: 'APURADO' });
+  L.push({ t: 'linha', a: 'Pacote 1', d: euro(f.p1) });
+  L.push({ t: 'linha', a: 'Pacote 2', d: euro(f.p2) });
+  L.push({ t: 'linha', a: 'Avulso / normal', d: euro(f.avulso) });
+  L.push({ t: 'linha', a: 'Ofertas (senhas)', d: String(f.ofertas) });
+  L.push({ t: 'sep' });
+  L.push({ t: 'sub', a: 'TOTAL' });
+  L.push({ t: 'linha', a: 'Senhas', d: String(f.senhas) });
+  L.push({ t: 'linha', a: 'Desconto concedido', d: euro(f.desconto) });
+  L.push({ t: 'linha', a: 'Vendas anuladas', d: String(f.anuladas) });
+  L.push({ t: 'linha', a: 'Valor anulado', d: euro(f.valorAnulado) });
+  L.push({ t: 'sep' });
+  L.push({ t: 'grande', a: 'VALOR EM CAIXA', d: euro(f.valor) });
+  return L;
+}
+
+function desenharTalao(f) {
+  const W = pontosLargura(), M = 6;
+  const fonte = (px, b) => `${b ? 'bold ' : ''}${px}px Arial, Helvetica, sans-serif`;
+  const alt = { titulo: 44, centro: 30, sub: 36, linha: 30, sep: 18, grande: 46 };
+  const L = linhasTalao(f);
+  const H = 10 + L.reduce((s, l) => s + alt[l.t], 0) + 10;
+  const c = document.createElement('canvas');
+  c.width = W; c.height = H;
+  const ctx = c.getContext('2d');
+  ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, W, H);
+  ctx.fillStyle = '#000'; ctx.strokeStyle = '#000'; ctx.textBaseline = 'middle';
+  const encaixar = (txt, px, b, max) => { let s = px; ctx.font = fonte(s, b); while (s > 12 && ctx.measureText(txt).width > max) { s--; ctx.font = fonte(s, b); } };
+  let y = 10;
+  for (const l of L) {
+    const h = alt[l.t], cy = y + h / 2;
+    if (l.t === 'sep') {
+      ctx.setLineDash([6, 4]); ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.moveTo(M, cy); ctx.lineTo(W - M, cy); ctx.stroke(); ctx.setLineDash([]);
+    } else if (l.t === 'titulo' || l.t === 'centro' || l.t === 'sub') {
+      ctx.textAlign = 'center';
+      const px = l.t === 'titulo' ? 32 : l.t === 'sub' ? 26 : 22;
+      encaixar(l.a, px, l.t !== 'centro' || l.b, W - 2 * M);
+      ctx.fillText(l.a, W / 2, cy);
+    } else {
+      const px = l.t === 'grande' ? 30 : (l.p ? 20 : 22);
+      const b = l.t === 'grande' || !!l.b;
+      let larguraDir = 0;
+      if (l.d) { ctx.font = fonte(px, b); larguraDir = ctx.measureText(l.d).width; ctx.textAlign = 'right'; ctx.fillText(l.d, W - M, cy); }
+      ctx.textAlign = 'left';
+      encaixar(l.a, px, b, W - 2 * M - larguraDir - 10);
+      ctx.fillText(l.a, M, cy);
+    }
+    y += h;
+  }
+  // texto nítido: só preto e branco (sem cinzentos)
+  const img = ctx.getImageData(0, 0, W, H), d = img.data;
+  for (let i = 0; i < d.length; i += 4) { const v = (d[i] + d[i + 1] + d[i + 2]) / 3 < 150 ? 0 : 255; d[i] = d[i + 1] = d[i + 2] = v; d[i + 3] = 255; }
+  ctx.putImageData(img, 0, 0);
+  return c.toDataURL('image/png');
+}
+
+async function imprimirTalao(num) {
+  const f = E.fechos.find(x => x.num === num);
+  if (!f) return aviso('O fecho Nº ' + num + ' não existe.');
+  try {
+    const src = desenharTalao(f);
+    if (E.config.modoImpressao === 'qz') {
+      await prepararImpressora();
+      const avanco = Math.min(10, Math.max(0, int(E.config.avanco)));
+      await qz.print(qz.configs.create(E.config.impressora), [
+        '\x1B\x40',
+        { type: 'raw', format: 'image', flavor: 'base64', data: src.split(',')[1],
+          options: { language: 'ESCPOS', dotDensity: 'double', imageEncoding: E.config.imgModo || 'gs_v_0' } },
+        '\x1B\x64' + String.fromCharCode(avanco),
+        '\x1D\x56\x42\x00'
+      ]);
+    } else {
+      const img = new Image();
+      img.src = src;
+      await img.decode();
+      const altMm = Math.ceil(img.height / 8) + 4;
+      $('estiloPagina').textContent = `@page { size: ${int(E.config.largura)}mm ${altMm}mm; margin: 0; }`;
+      img.style.width = mmUtil() + 'mm';
+      img.style.display = 'block';
+      img.style.margin = '2mm auto';
+      const area = $('areaImpressao');
+      area.innerHTML = '';
+      area.appendChild(img);
+      window.print();
+      area.innerHTML = '';
+    }
+  } catch (e) {
+    aviso('A impressão do talão falhou.\n\n' + msgErro(e) + '\n\nPode reimprimi-lo no ecrã TURNO.', 'Talão');
+  }
+}
+
+async function reimprimirTalao(num) {
+  if (modo !== 'ADMIN' && !await pedirPalavraPasse('Reimprimir o talão de um fecho pede a palavra-passe de administrador.')) return;
+  if (!await confirmar(`Imprimir outra vez o talão do fecho Nº ${num}?`, 'Talão')) return;
+  await imprimirTalao(num);
 }
 
 /* =====================================================================
