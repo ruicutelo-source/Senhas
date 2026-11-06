@@ -36,6 +36,7 @@
     <nav class="topo-nav">
       <button class="btn nav" data-acao="irVenda" id="navVenda">VENDA</button>
       <button class="btn nav" data-acao="irTurno" id="navTurno">TURNO</button>
+      <button class="btn nav" data-acao="irHistorico" id="navHistorico">HISTÓRICO</button>
       <button class="btn nav" data-acao="irDefinicoes" id="navDefinicoes">DEFINIÇÕES</button>
       <button class="btn nav fecho" data-acao="fecharCaixa" id="navFecho">FECHO DE CAIXA</button>
       <button class="btn nav modo" data-acao="trocarModo" id="navModo">MODO</button>
@@ -81,6 +82,17 @@
     <!-- ===================== TURNO ===================== -->
     <section id="ecraTurno" class="ecra" hidden>
       <div class="turno" id="turnoConteudo"></div>
+    </section>
+
+    <!-- ===================== HISTÓRICO ===================== -->
+    <section id="ecraHistorico" class="ecra" hidden>
+      <div class="historico">
+        <div class="abas">
+          <button class="aba" id="histAbaRegisto" data-acao="histAba" data-aba="registo">REGISTO DE VENDAS</button>
+          <button class="aba" id="histAbaFechos" data-acao="histAba" data-aba="fechos">FECHOS DE CAIXA</button>
+        </div>
+        <div class="cartao" id="histConteudo"></div>
+      </div>
     </section>
 
     <!-- ===================== DEFINIÇÕES ===================== -->
@@ -186,6 +198,17 @@
         </div>
 
         <div class="cartao bloco">
+          <h2>Dados e evento</h2>
+          <div class="botoes-linha">
+            <button class="btn verde" data-acao="exportarExcel">EXPORTAR PARA EXCEL</button>
+            <button class="btn azul" data-acao="copiaSeguranca">CÓPIA DE SEGURANÇA</button>
+            <label class="btn cinza-escuro ficheiro">RESTAURAR CÓPIA<input id="ficheiroRestaurar" type="file" accept=".json,application/json" hidden></label>
+            <button class="btn vermelho" data-acao="novoEvento">NOVO EVENTO</button>
+          </div>
+          <p class="nota">Os ficheiros ficam na pasta Transferências. A cópia de segurança guarda tudo (produtos, definições, vendas e fechos), exceto a chave de impressão. O NOVO EVENTO faz uma cópia automática antes de apagar as vendas.</p>
+        </div>
+
+        <div class="cartao bloco">
           <h2>Palavra-passe de administrador</h2>
           <div class="campos">
             <label>Palavra-passe atual <input id="pwAtual" type="password" autocomplete="current-password"></label>
@@ -215,6 +238,7 @@
 <div id="areaImpressao"></div>
 
 <script src="qz-tray.js"></script>
+<script src="xlsx.mini.min.js"></script>
 <script src="app.js"></script>
 </body>
 </html>

@@ -170,7 +170,7 @@ details.chave textarea { width: 100%; font: 12px Consolas, monospace; padding: 8
 .turno-grelha { display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr); gap: 16px; align-items: start; }
 .turno h2 { margin: 0 0 12px; font-size: 18px; color: var(--escuro); }
 .turno h2 small { font-weight: normal; font-size: 12px; color: var(--cinza); }
-.tab-turno td { padding: 7px 6px; }
+.tab-turno td { padding: 7px 6px; white-space: nowrap; }
 .tab-turno td.esq { text-align: left; }
 .tab-turno tr.total td { font-weight: bold; background: #ecf0f1; }
 .grafico { width: 100%; height: auto; display: block; margin-bottom: 10px; }
@@ -180,7 +180,32 @@ details.chave textarea { width: 100%; font: 12px Consolas, monospace; padding: 8
 .g-valor { font: bold 11px Arial, sans-serif; fill: #34495e; }
 .g-grelha { stroke: #e3e7eb; stroke-width: 1; }
 .resumo.apurado { margin-top: 10px; border-top: 1px solid var(--borda); width: 100%; }
-@media (max-width: 1000px) { .turno-grelha { grid-template-columns: 1fr; } }
+@media (max-width: 1000px) { .turno-grelha { grid-template-columns: minmax(0, 1fr); } }
+.turno, .historico { grid-template-columns: minmax(0, 1fr); }
+.turno-grelha > .cartao, #histConteudo { overflow-x: auto; min-width: 0; }
+@media (max-width: 700px) {
+  .topo-nav { flex-wrap: wrap; width: 100%; margin-left: 0; }
+  .topo-nav .btn.nav { flex: 1 1 auto; }
+}
+
+/* ---------- Fase 3 ---------- */
+.historico { max-width: 1400px; margin: 0 auto; display: grid; gap: 12px; }
+.abas { display: flex; gap: 8px; }
+.aba { border: 0; border-radius: 10px 10px 0 0; padding: 12px 18px; font: bold 14px Arial, sans-serif; background: #dfe4e8; color: var(--escuro); cursor: pointer; }
+.aba.ativo { background: #fff; box-shadow: 0 -1px 0 var(--borda); }
+.filtros { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 10px; margin-bottom: 10px; }
+.filtros label { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: #555; }
+.hist-resumo { font-size: 13px; color: #444; margin: 4px 0 10px; }
+.tab-hist { font-size: 13px; }
+.tab-hist td { padding: 6px 5px; white-space: nowrap; }
+.tab-hist td.esq { text-align: left; white-space: normal; }
+.tab-hist tr.anulada td { background: #fbe4e1; color: #96281e; }
+.tab-hist tr.clicavel { cursor: pointer; }
+.tab-hist tr.clicavel:hover td { background: #eef4fa; }
+.tab-hist tr.escolhido td { background: #dbe9f6; font-weight: bold; }
+.historico .turno-grelha { margin-top: 14px; }
+.historico h2 { margin: 0 0 12px; font-size: 18px; color: var(--escuro); }
+.historico h2 small { font-weight: normal; font-size: 12px; color: var(--cinza); }
 
 /* ---------- Janela ---------- */
 #fundoModal { position: fixed; inset: 0; background: rgba(20,30,40,.55); display: flex; align-items: center; justify-content: center; z-index: 20; padding: 16px; }
@@ -228,3 +253,5 @@ details.chave textarea { width: 100%; font: 12px Consolas, monospace; padding: 8
   #areaImpressao .senha { page-break-after: always; break-after: page; }
   #areaImpressao .senha:last-child { page-break-after: auto; break-after: auto; }
 }
+.definicoes { grid-template-columns: minmax(0, 1fr); }
+.definicoes .bloco { min-width: 0; overflow-x: auto; }

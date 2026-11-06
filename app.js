@@ -5,7 +5,7 @@
    A estrutura dos dados está pensada para passar mais tarde ao Firebase.
    ===================================================================== */
 
-const VERSAO = '2.0';
+const VERSAO = '3.0';
 const PROD_N = 14;
 const PAC_N = 2;
 const SENHA_INICIAL = '1234';
@@ -271,6 +271,9 @@ function mostrar(qual) {
   $('ecraVenda').hidden = qual !== 'venda';
   $('ecraDefinicoes').hidden = qual !== 'definicoes';
   $('ecraTurno').hidden = qual !== 'turno';
+  $('ecraHistorico').hidden = qual !== 'historico';
+  $('navHistorico').classList.toggle('ativo', qual === 'historico');
+  $('navHistorico').hidden = modo !== 'ADMIN';
   $('navVenda').classList.toggle('ativo', qual === 'venda');
   $('navTurno').classList.toggle('ativo', qual === 'turno');
   $('navDefinicoes').classList.toggle('ativo', qual === 'definicoes');
@@ -279,6 +282,7 @@ function mostrar(qual) {
   if (qual === 'venda') renderVenda();
   if (qual === 'definicoes') renderDefinicoes();
   if (qual === 'turno') renderTurno();
+  if (qual === 'historico') renderHistorico();
   if (qual === 'entrada') renderEntrada();
   renderTopo();
   window.scrollTo(0, 0);
@@ -304,6 +308,11 @@ const acoes = {
   irVenda() { mostrar('venda'); },
   irDefinicoes() { if (modo === 'ADMIN') mostrar('definicoes'); },
   irTurno() { mostrar('turno'); },
+  irHistorico() { if (modo === 'ADMIN') mostrar('historico'); },
+  histAba(el) { histAba = el.dataset.aba; renderHistorico(); },
+  exportarExcel() { exportarExcel(); },
+  copiaSeguranca() { copiaSeguranca(); },
+  novoEvento() { novoEvento(); },
   fecharCaixa() { fecharCaixa(); },
   anular() { anularVenda(); },
   reimprimir() { reimprimirPedido(); },
@@ -1531,6 +1540,228 @@ async function reimprimirTalao(num) {
   if (modo !== 'ADMIN' && !await pedirPalavraPasse('Reimprimir o talão de um fecho pede a palavra-passe de administrador.')) return;
   if (!await confirmar(`Imprimir outra vez o talão do fecho Nº ${num}?`, 'Talão')) return;
   await imprimirTalao(num);
+}
+
+/* =====================================================================
+   FASE 3 — histórico, exportar para Excel, cópia de segurança, novo evento
+   ===================================================================== */
+const nomeFicheiro = s => String(s || 'Evento').replace(/[\\/:*?"<>|]+/g, '-').trim() || 'Evento';
+const carimbo = () => { const d = new Date(), p = n => String(n).padStart(2, '0'); return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}_${p(d.getHours())}${p(d.getMinutes())}`; };
+
+function descarregar(nome, conteudo, tipo) {
+  const blob = conteudo instanceof Blob ? conteudo : new Blob([conteudo], { type: tipo });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = nome;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 5000);
+}
+
+/* ---------- HISTÓRICO ---------- */
+let histAba = 'registo', histFecho = null;
+
+function renderHistorico() {
+  $('histAbaRegisto').classList.toggle('ativo', histAba === 'registo');
+  $('histAbaFechos').classList.toggle('ativo', histAba === 'fechos');
+  if (histAba === 'registo') renderHistRegisto(); else renderHistFechos();
+}
+
+function opcoes(lista, atual) {
+  return lista.map(([v, t]) => `<option value="${esc(v)}"${String(v) === String(atual) ? ' selected' : ''}>${esc(t)}</option>`).join('');
+}
+
+const filtro = { produto: '', formato: '', estado: '', fecho: '' };
+
+function renderHistRegisto() {
+  const prods = Array.from(new Set(E.registo.map(l => l.produto)));
+  const fechos = E.fechos.map(f => [String(f.num), 'Fecho Nº ' + f.num]);
+  let h = `<div class="filtros">
+    <label>Produto <select data-filtro="produto">${opcoes([['', 'Todos'], ...prods.map(p => [p, p])], filtro.produto)}</select></label>
+    <label>Tipo <select data-filtro="formato">${opcoes([['', 'Todos'], ['Pacote 1', 'Pacote 1'], ['Pacote 2', 'Pacote 2'], ['Avulso', 'Avulso'], ['Normal', 'Normal'], ['Oferta', 'Oferta']], filtro.formato)}</select></label>
+    <label>Estado <select data-filtro="estado">${opcoes([['', 'Todos'], ['Válida', 'Válida'], ['Anulada', 'Anulada']], filtro.estado)}</select></label>
+    <label>Fecho <select data-filtro="fecho">${opcoes([['', 'Todos'], ['turno', 'Turno atual (sem fecho)'], ...fechos], filtro.fecho)}</select></label>
+  </div>`;
+  const ls = E.registo.filter(l =>
+    (!filtro.produto || l.produto === filtro.produto) &&
+    (!filtro.formato || l.formato === filtro.formato) &&
+    (!filtro.estado || l.estado === filtro.estado) &&
+    (!filtro.fecho || (filtro.fecho === 'turno' ? !l.fecho : String(l.fecho) === filtro.fecho))
+  ).sort((a, b) => b.venda - a.venda);
+  const sen = ls.filter(valida).reduce((s, l) => s + l.qtd, 0);
+  const val = r2(ls.filter(valida).reduce((s, l) => s + l.valor, 0));
+  h += `<p class="hist-resumo">${ls.length} linha(s) · válidas: <b>${sen} senhas · ${euro(val)}</b>${ls.length > 400 ? ' · a mostrar as 400 mais recentes' : ''}</p>`;
+  if (!ls.length) h += '<p class="nota">Sem linhas com estes filtros.</p>';
+  else {
+    h += '<div class="tabela-rolar"><table class="tabela tab-hist"><thead><tr><th>Nº</th><th>Data/hora</th><th>Produto</th><th>Tipo</th><th>Senhas</th><th>Números</th><th>Preço</th><th>Valor</th><th>Desconto</th><th>Estado</th><th>Fecho</th><th>Pedido</th><th>Motivo</th><th>Reimpr.</th></tr></thead><tbody>';
+    for (const l of ls.slice(0, 400)) {
+      const pu = l.preco.toLocaleString('pt-PT', { minimumFractionDigits: 2, maximumFractionDigits: 4 });
+      h += `<tr class="${l.estado === 'Anulada' ? 'anulada' : ''}"><td>${l.venda}</td><td>${dataHoraPT(l.data)}</td><td class="esq">${esc(l.produto)}</td><td>${esc(l.formato)}</td><td>${l.qtd}</td>` +
+        `<td>${esc(l.ini)} a ${esc(l.fim)}</td><td>${pu}</td><td>${euro(l.valor)}</td><td>${euro(l.desconto)}</td><td>${esc(l.estado)}</td>` +
+        `<td>${l.fecho || ''}</td><td>${l.pedido}</td><td class="esq">${esc(l.motivo || '')}</td><td>${l.reimpressoes || ''}</td></tr>`;
+    }
+    h += '</tbody></table></div>';
+  }
+  $('histConteudo').innerHTML = h;
+  $('histConteudo').querySelectorAll('[data-filtro]').forEach(s => {
+    s.onchange = () => { filtro[s.dataset.filtro] = s.value; renderHistRegisto(); };
+  });
+}
+
+function renderHistFechos() {
+  let h = '';
+  if (!E.fechos.length) { $('histConteudo').innerHTML = '<p class="nota">Ainda não há fechos de caixa neste evento.</p>'; return; }
+  if (histFecho === null || !E.fechos.find(f => f.num === histFecho)) histFecho = E.fechos[E.fechos.length - 1].num;
+  h += '<div class="tabela-rolar"><table class="tabela tab-hist"><thead><tr><th>Nº</th><th>Data/hora</th><th>Vendas</th><th>Pedidos</th><th>Senhas</th><th>Pacote 1</th><th>Pacote 2</th><th>Avulso</th><th>Ofertas</th><th>Desconto</th><th>Anuladas</th><th>Em caixa</th></tr></thead><tbody>';
+  for (const f of E.fechos.slice().reverse()) {
+    h += `<tr class="clicavel${f.num === histFecho ? ' escolhido' : ''}" data-fecho="${f.num}"><td>${f.num}</td><td>${dataHoraPT(f.data)}</td><td>${f.vendaIni}–${f.vendaFim}</td><td>${f.pedidos}</td><td>${f.senhas}</td>` +
+      `<td>${euro(f.p1)}</td><td>${euro(f.p2)}</td><td>${euro(f.avulso)}</td><td>${f.ofertas}</td><td>${euro(f.desconto)}</td><td>${f.anuladas} · ${euro(f.valorAnulado)}</td><td><b>${euro(f.valor)}</b></td></tr>`;
+  }
+  h += '</tbody></table></div><p class="nota">Toque num fecho para ver o detalhe e os gráficos.</p>';
+
+  const f = E.fechos.find(x => x.num === histFecho);
+  const det = E.fechosDetalhe.filter(d => d.fecho === f.num);
+  h += `<div class="turno-grelha"><div class="cartao"><h2>Fecho Nº ${f.num} <small>${dataHoraPT(f.data)}${f.posto ? ' · ' + esc(f.posto) : ''}</small></h2>`;
+  h += '<table class="tabela tab-turno"><thead><tr><th>Produto</th><th>Tipo</th><th>Senhas</th><th>Valor</th><th>Desconto</th><th>Anuladas</th></tr></thead><tbody>';
+  for (const d of det) h += `<tr><td class="esq">${esc(d.produto)}</td><td>${esc(d.formato)}</td><td>${d.senhas}</td><td>${euro(d.valor)}</td><td>${euro(d.desconto)}</td><td>${d.anuladas ? d.anuladas + ' · ' + euro(d.valorAnulado) : ''}</td></tr>`;
+  h += `<tr class="total"><td class="esq">Total</td><td></td><td>${f.senhas}</td><td>${euro(f.valor)}</td><td>${euro(f.desconto)}</td><td>${f.anuladas ? f.anuladas + ' · ' + euro(f.valorAnulado) : ''}</td></tr></tbody></table>`;
+  h += `<div class="botoes-linha" style="margin-top:12px"><button class="btn cinza-escuro" data-acao="reimprimirTalao" data-n="${f.num}">IMPRIMIR TALÃO</button></div></div>`;
+  h += '<div class="cartao"><h2>Vendas por hora</h2>' +
+    graficoBarras(f.horas || [], 'valor', 'Euros por hora', v => euroCurto(v), '#2980b9') +
+    graficoBarras(f.horas || [], 'senhas', 'Senhas por hora', v => String(Math.round(v)), '#e67e22') + '</div></div>';
+  $('histConteudo').innerHTML = h;
+  $('histConteudo').querySelectorAll('[data-fecho]').forEach(tr => {
+    tr.onclick = () => { histFecho = int(tr.dataset.fecho); renderHistFechos(); };
+  });
+}
+
+/* ---------- EXPORTAR PARA EXCEL ---------- */
+function serialExcel(iso) {
+  if (!iso) return null;
+  const d = new Date(iso);
+  return (d.getTime() - d.getTimezoneOffset() * 60000) / 86400000 + 25569;   // dias desde 30/12/1899, hora local
+}
+
+function folha(cabecalho, linhas, formatos, larguras) {
+  const ws = XLSX.utils.aoa_to_sheet([cabecalho, ...linhas]);
+  const range = XLSX.utils.decode_range(ws['!ref']);
+  for (let r = 1; r <= range.e.r; r++) {
+    for (const [c, z] of Object.entries(formatos)) {
+      const cel = ws[XLSX.utils.encode_cell({ r, c: int(c) })];
+      if (cel && cel.t === 'n') cel.z = z;
+    }
+  }
+  ws['!cols'] = larguras.map(w => ({ wch: w }));
+  ws['!autofilter'] = { ref: XLSX.utils.encode_range({ s: { r: 0, c: 0 }, e: { r: 0, c: cabecalho.length - 1 } }) };
+  return ws;
+}
+
+async function exportarExcel() {
+  if (typeof XLSX === 'undefined') return aviso('A peça de exportação para Excel não carregou. Recarregue a app (Ctrl+F5) com internet.');
+  const EUR = '#,##0.00 €', EUR4 = '#,##0.00## €', DH = 'dd/mm/yyyy hh:mm', DHS = 'dd/mm/yyyy hh:mm:ss';
+  const wb = XLSX.utils.book_new();
+  const reg = E.registo.slice().sort((a, b) => a.venda - b.venda).map(l => [
+    l.venda, serialExcel(l.data), l.produto, l.qtd, 0, l.qtd, l.ini, l.fim, l.preco, l.valor, l.desconto,
+    l.estado, l.fecho || '', l.anuladaEm ? serialExcel(l.anuladaEm) : '', l.pedido, l.formato, l.motivo || '', l.posto || '', l.reimpressoes || 0
+  ]);
+  XLSX.utils.book_append_sheet(wb, folha(
+    ['Nº venda', 'Data/hora', 'Tipo', 'Pagas', 'Oferta', 'Total senhas', 'Senha inicial', 'Senha final', 'Preço unit.', 'Valor vendido', 'Desconto',
+      'Estado', 'Nº fecho', 'Anulada em', 'Nº pedido', 'Formato', 'Motivo', 'Posto', 'Reimpressões'],
+    reg, { 1: DHS, 8: EUR4, 9: EUR, 10: EUR, 13: DHS }, [9, 19, 18, 7, 7, 11, 13, 13, 11, 12, 10, 9, 9, 19, 9, 11, 30, 10, 11]), 'Registo');
+
+  const fec = E.fechos.map(f => [f.num, serialExcel(f.data), f.evento, f.vendaIni, f.vendaFim, f.pedidos, f.senhas, f.valor, f.desconto,
+    f.semDesconto, f.p1, f.p2, f.avulso, f.ofertas, f.anuladas, f.valorAnulado, f.posto || '']);
+  XLSX.utils.book_append_sheet(wb, folha(
+    ['Nº fecho', 'Data/hora', 'Evento', '1ª venda', 'Última venda', 'Pedidos', 'Senhas', 'Valor vendido', 'Desconto', 'Valor sem desconto',
+      'Pacote 1 (€)', 'Pacote 2 (€)', 'Avulso (€)', 'Senhas oferta', 'Vendas anuladas', 'Valor anulado', 'Posto'],
+    fec, { 1: DH, 7: EUR, 8: EUR, 9: EUR, 10: EUR, 11: EUR, 12: EUR, 15: EUR }, [9, 17, 22, 9, 12, 9, 9, 13, 11, 16, 12, 12, 12, 12, 14, 12, 10]), 'Fechos');
+
+  const det = E.fechosDetalhe.map(d => [d.fecho, serialExcel(d.data), d.produto, d.formato, d.preco, d.senhas, d.valor, d.desconto, d.anuladas, d.valorAnulado]);
+  XLSX.utils.book_append_sheet(wb, folha(
+    ['Nº fecho', 'Data/hora', 'Produto', 'Formato', 'Preço por senha', 'Senhas', 'Valor vendido', 'Desconto', 'Vendas anuladas', 'Valor anulado'],
+    det, { 1: DH, 4: EUR4, 6: EUR, 7: EUR, 9: EUR }, [9, 17, 20, 11, 15, 9, 13, 11, 15, 13]), 'FechosDetalhe');
+
+  const hora = [];
+  for (const f of E.fechos) for (const x of (f.horas || [])) hora.push([f.num, serialExcel(x.inicio), x.senhas, x.valor]);
+  XLSX.utils.book_append_sheet(wb, folha(['Nº fecho', 'Hora', 'Senhas', 'Valor'], hora, { 1: DH, 3: EUR }, [9, 17, 9, 12]), 'VendasPorHora');
+
+  const nome = `Senhas_${nomeFicheiro(E.config.evento)}_${carimbo()}.xlsx`;
+  const dados = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
+  descarregar(nome, new Blob([dados], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }));
+  aviso(`Ficheiro Excel criado:\n${nome}\n\nEstá na pasta Transferências.`, 'Exportar');
+}
+
+/* ---------- CÓPIA DE SEGURANÇA ---------- */
+function conteudoCopia() {
+  const copia = JSON.parse(JSON.stringify(E));
+  copia.config.chaveQZ = '';   // a chave de impressão nunca sai deste computador
+  return JSON.stringify({ app: 'Senhas', versaoApp: VERSAO, versaoDados: E.versaoDados || 1, criadaEm: new Date().toISOString(), estado: copia }, null, 1);
+}
+
+function fazerCopia(prefixo = 'Copia') {
+  const nome = `Senhas_${prefixo}_${nomeFicheiro(E.config.evento)}_${carimbo()}.json`;
+  descarregar(nome, conteudoCopia(), 'application/json');
+  return nome;
+}
+
+async function copiaSeguranca() {
+  const nome = fazerCopia();
+  aviso(`Cópia de segurança criada:\n${nome}\n\nEstá na pasta Transferências. Guarde-a também fora do PC (pen ou nuvem).`, 'Cópia de segurança');
+}
+
+$('ficheiroRestaurar').addEventListener('change', async e => {
+  const f = e.target.files[0];
+  e.target.value = '';
+  if (!f) return;
+  let dados;
+  try {
+    dados = JSON.parse(await f.text());
+  } catch (err) {
+    return aviso('O ficheiro não é uma cópia de segurança válida.', 'Restaurar');
+  }
+  const est = dados && dados.estado;
+  if (!dados || dados.app !== 'Senhas' || !est || !Array.isArray(est.produtos) || !Array.isArray(est.registo) || !est.config)
+    return aviso('O ficheiro não é uma cópia de segurança da app Senhas.', 'Restaurar');
+  const info = `<b>${esc(f.name)}</b><br>Criada em ${dataHoraPT(dados.criadaEm)} (v${esc(dados.versaoApp)})<br>` +
+    `Evento: <b>${esc(est.config.evento)}</b> · ${est.registo.length} linhas de venda · ${(est.fechos || []).length} fecho(s)`;
+  if (!await confirmar(info + '<br><br><b>Os dados atuais desta app são substituídos por estes.</b> Continuar?', 'Restaurar cópia', 'SIM, RESTAURAR', 'NÃO')) return;
+  if (!await confirmar('Tem a certeza? Esta operação não se pode desfazer.<br>(Se quiser, faça antes uma CÓPIA DE SEGURANÇA dos dados atuais.)', 'Restaurar cópia', 'RESTAURAR', 'CANCELAR')) return;
+  const chave = E.config.chaveQZ;
+  const novo = { ...estadoInicial(), ...est };
+  novo.config = { ...CONFIG_PADRAO, ...est.config, chaveQZ: chave };
+  novo.pedido = [];
+  E = novo;
+  await guardar();
+  modo = null;
+  mostrar('entrada');
+  aviso('Cópia restaurada. Entre outra vez na app.\n(A palavra-passe de administrador passa a ser a da cópia.)', 'Restaurar');
+});
+
+/* ---------- NOVO EVENTO ---------- */
+async function novoEvento() {
+  if (E.pedido.length) return aviso('Há um pedido por imprimir.\nCarregue em IMPRIMIR PEDIDO ou em LIMPAR antes do novo evento.', 'Novo evento');
+  const abertas = linhasTurno().length;
+  if (abertas) return aviso(`Há ${abertas} linha(s) de venda sem fecho de caixa.\nFaça primeiro o FECHO DE CAIXA e depois volte a carregar em NOVO EVENTO.`, 'Novo evento');
+  if (!await confirmar(`<b>NOVO EVENTO</b><br><br>A app vai:<br>1. Descarregar uma cópia de segurança de tudo o que existe agora<br>` +
+    `2. Apagar todas as vendas e todos os fechos<br>3. Pôr a numeração das senhas de todos os produtos a 1<br><br>` +
+    `Produtos, preços, pacotes, logótipo e impressora mantêm-se.<br><br>Continuar?`, 'Novo evento', 'CONTINUAR', 'CANCELAR')) return;
+  const nome = await perguntar('Nome do novo evento:', 'Novo evento', { valor: E.config.evento, max: 40 });
+  if (!nome) return;
+  const data = await perguntar('Data do novo evento:', 'Novo evento', { tipo: 'date', valor: new Date().toISOString().slice(0, 10) });
+  if (!data) return;
+
+  const copia = fazerCopia('AntesNovoEvento');
+  E.registo = [];
+  E.fechos = [];
+  E.fechosDetalhe = [];
+  E.pedido = [];
+  E.ultimoPedido = '';
+  E.produtos.forEach(p => { p.prox = 1; });
+  E.config.evento = nome;
+  E.config.data = data;
+  await guardar();
+  renderTopo();
+  renderDefinicoes();
+  aviso(`Novo evento pronto: ${nome} · ${dataPT(data)}\n\nCópia do evento anterior:\n${copia}\n(pasta Transferências)\n\nReveja produtos, preços e pacotes antes de começar a vender.`, 'Novo evento');
 }
 
 /* =====================================================================
