@@ -121,6 +121,7 @@
             <label>Como imprimir
               <select id="defModo">
                 <option value="qz">Direto na impressora térmica (QZ Tray)</option>
+                <option value="rawbt">Tablet / telemóvel Android (RawBT)</option>
                 <option value="browser">Janela de impressão do browser</option>
               </select>
             </label>
@@ -130,10 +131,12 @@
           </div>
           <div id="blocoQZ">
             <div class="campos">
+              <label>Avanço do papel antes do corte (linhas) <input id="defAvanco" type="number" min="0" max="10" step="1"></label>
+            </div>
+            <div class="campos" id="soQZ1">
               <label>Impressora
                 <select id="defImpressora"></select>
               </label>
-              <label>Avanço do papel antes do corte (linhas) <input id="defAvanco" type="number" min="0" max="10" step="1"></label>
               <label>Modo da imagem
                 <select id="defImgModo">
                   <option value="gs_v_0">Raster (recomendado)</option>
@@ -149,6 +152,8 @@
               <img id="defClaridadeImg" class="raster" alt="Como sai a senha" hidden>
               <p class="nota">A imagem mostra como a senha sai na térmica. Mova a barra e carregue em GRAVAR IMPRESSÃO.</p>
             </div>
+            <p class="nota" id="soRawBT">A app envia as senhas já prontas (imagem, avanço e corte) para a app <b>RawBT</b>, que as passa à impressora. Na RawBT basta ter a impressora escolhida e marcada como padrão. Se o Android perguntar com que app abrir, escolha <b>RawBT</b> e <b>Sempre</b>.</p>
+            <div id="soQZ">
             <p class="estado-qz" id="qzEstado">QZ Tray: ainda não verificado.</p>
             <div class="botoes-linha" style="margin-bottom:12px">
               <button class="btn cinza-escuro" data-acao="procurarImpressoras">PROCURAR IMPRESSORAS</button>
@@ -163,6 +168,7 @@
                 <button class="btn cinza" data-acao="apagarChave">APAGAR CHAVE</button>
               </div>
             </details>
+            </div>
           </div>
           <div id="blocoBrowser" class="campos">
             <label>Altura de cada senha (mm) <input id="defAltura" type="number" min="25" max="120" step="1"></label>

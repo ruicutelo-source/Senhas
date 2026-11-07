@@ -5,7 +5,7 @@
    A estrutura dos dados está pensada para passar mais tarde ao Firebase.
    ===================================================================== */
 
-const VERSAO = '3.2';
+const VERSAO = '3.3';
 const PROD_N = 14;
 const PAC_N = 2;
 const SENHA_INICIAL = '1234';
@@ -39,7 +39,7 @@ ea3ubs+lUfOXZrJO15vRzpMV0Fg1mqdg4t/YMyevI9g2u6ReKgtWcWs=
 const CONFIG_PADRAO = {
   evento: 'Magusto 2026/1', data: '2026-11-04', posto: 'Posto 1',
   largura: 80, alturaSenha: 45, logo: '', senhaHash: '',
-  modoImpressao: 'qz', impressora: 'BP-T3', avanco: 3, imgModo: 'gs_v_0', chaveQZ: '', claridade: 0
+  modoImpressao: 'qz', impressora: 'BP-T3', avanco: 3, imgModo: 'gs_v_0', chaveQZ: '', claridade: 0, modoDetetado: false
 };
 
 const CORES = {
@@ -610,7 +610,7 @@ async function imprimirPedido() {
       const outra = await janela({
         titulo: 'Impressão',
         html: `O pedido Nº ${nPed} ficou registado, mas as senhas não saíram.<br><br><i>${esc(msgErro(e))}</i><br><br>` +
-          'Resolva o problema (impressora ligada, com papel, QZ Tray aberto) e carregue em TENTAR OUTRA VEZ.',
+          'Resolva o problema (impressora ligada, com papel, QZ Tray aberto no PC ou RawBT no tablet) e carregue em TENTAR OUTRA VEZ.',
         botoes: [{ texto: 'DESISTIR', classe: 'cinza', valor: false }, { texto: 'TENTAR OUTRA VEZ', classe: 'verde', valor: true }]
       });
       if (!outra) {
@@ -749,6 +749,10 @@ function pontilhar(ctx, w, h) {
 
 // Senha = logótipo (2,5 cm de altura) + nome do produto (encolhe se não couber)
 async function desenharSenha(nome, claridade) {
+  return (await desenharSenhaCanvas(nome, claridade)).toDataURL('image/png');
+}
+
+async function desenharSenhaCanvas(nome, claridade) {
   if (claridade === undefined) claridade = int(E.config.claridade);
   const W = pontosLargura();
   const txt = nome.toUpperCase();
@@ -783,7 +787,7 @@ async function desenharSenha(nome, claridade) {
   ctx.textBaseline = 'top';
   ctx.fillText(txt, W / 2, y + Math.round(fs * 0.08));
   pontilhar(ctx, W, H);
-  return c.toDataURL('image/png');
+  return c;
 }
 
 async function imprimirQZ(nomes) {
@@ -803,6 +807,77 @@ async function imprimirQZ(nomes) {
     dados.push('\x1D\x56\x42\x00');                           // cortar
   }
   await qz.print(cfg, dados);
+}
+
+/* ---------- Tablet / telemóvel Android: RawBT ----------
+   A app gera os comandos ESC/POS (os mesmos do QZ Tray: imagem GS v 0, avanço e corte)
+   e entrega-os ao RawBT, que os passa à impressora sem os converter. */
+const RAWBT_MAX_SENHAS = 10;   // senhas por envio (cada envio vai num único endereço intent)
+
+function bytesRaster(canvas) {
+  const w = canvas.width, h = canvas.height, wb = Math.ceil(w / 8);
+  const d = canvas.getContext('2d').getImageData(0, 0, w, h).data;
+  const partes = [];
+  const FAIXA = 128;                                       // linhas por comando GS v 0
+  for (let y0 = 0; y0 < h; y0 += FAIXA) {
+    const fh = Math.min(FAIXA, h - y0);
+    const b = new Uint8Array(8 + wb * fh);
+    b.set([0x1D, 0x76, 0x30, 0x00, wb & 255, wb >> 8, fh & 255, fh >> 8]);
+    for (let y = 0; y < fh; y++) {
+      for (let x = 0; x < w; x++) {
+        const i = ((y0 + y) * w + x) * 4;
+        if (d[i] < 128) b[8 + y * wb + (x >> 3)] |= 0x80 >> (x & 7);
+      }
+    }
+    partes.push(b);
+  }
+  return partes;
+}
+
+// Um trabalho: para cada imagem → iniciar, imagem, avançar n linhas, cortar
+function trabalhoESCPOS(canvases) {
+  const avanco = Math.min(10, Math.max(0, int(E.config.avanco)));
+  const partes = [];
+  for (const c of canvases) {
+    partes.push(new Uint8Array([0x1B, 0x40]));
+    partes.push(...bytesRaster(c));
+    partes.push(new Uint8Array([0x1B, 0x64, avanco]));
+    partes.push(new Uint8Array([0x1D, 0x56, 0x42, 0x00]));
+  }
+  const total = partes.reduce((s, p) => s + p.length, 0);
+  const out = new Uint8Array(total);
+  let o = 0;
+  for (const p of partes) { out.set(p, o); o += p.length; }
+  return out;
+}
+
+function base64Bytes(bytes) {
+  let s = '';
+  for (let i = 0; i < bytes.length; i += 0x8000) s += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
+  return btoa(s);
+}
+
+function enviarRawBT(bytes) {
+  if (!/Android/i.test(navigator.userAgent))
+    throw new Error('O modo RawBT só funciona num tablet ou telemóvel Android com a app RawBT instalada.');
+  location.href = 'intent:base64,' + base64Bytes(bytes) + '#Intent;scheme=rawbt;package=ru.a402d.rawbtprinter;end;';
+}
+
+async function imprimirRawBT(nomes) {
+  const cache = {};
+  for (const n of nomes) if (!cache[n]) cache[n] = await desenharSenhaCanvas(n);
+  for (let i = 0; i < nomes.length; i += RAWBT_MAX_SENHAS) {
+    if (i > 0) {
+      const seguir = await janela({
+        titulo: 'Impressão',
+        html: `Já foram enviadas <b>${i}</b> de <b>${nomes.length}</b> senhas.<br>Quando terminarem de sair, carregue em CONTINUAR.`,
+        botoes: [{ texto: 'CONTINUAR', classe: 'verde', valor: true }]
+      });
+      if (!seguir) throw new Error(`Só saíram ${i} de ${nomes.length} senhas.`);
+    }
+    enviarRawBT(trabalhoESCPOS(nomes.slice(i, i + RAWBT_MAX_SENHAS).map(n => cache[n])));
+    await new Promise(r => setTimeout(r, 300));
+  }
 }
 
 /* ---------- Impressão pelo browser ---------- */
@@ -858,6 +933,7 @@ async function imprimirBrowser(nomes) {
 async function imprimirSenhas(nomes) {
   if (!nomes.length) return;
   if (E.config.modoImpressao === 'qz') await imprimirQZ(nomes);
+  else if (E.config.modoImpressao === 'rawbt') await imprimirRawBT(nomes);
   else await imprimirBrowser(nomes);
 }
 
@@ -869,7 +945,7 @@ function nomeMaisComprido() {
 
 async function preVisualizar() {
   let html;
-  if (E.config.modoImpressao === 'qz') {
+  if (E.config.modoImpressao !== 'browser') {
     const src = await desenharSenha(nomeMaisComprido());
     html = `<div class="previa"><img class="raster" src="${src}" alt=""></div>` +
       `<p class="nota">Assim sai na térmica (rolo de ${int(E.config.largura)} mm, pontos a preto e branco). Nome mais comprido dos produtos.</p>`;
@@ -953,9 +1029,12 @@ async function apagarChave() {
 }
 
 function mostrarBlocosImpressao() {
-  const qzModo = $('defModo').value === 'qz';
-  $('blocoQZ').hidden = !qzModo;
-  $('blocoBrowser').hidden = qzModo;
+  const m = $('defModo').value;
+  $('blocoQZ').hidden = m === 'browser';
+  $('soQZ').hidden = m !== 'qz';
+  $('soQZ1').hidden = m !== 'qz';
+  $('soRawBT').hidden = m !== 'rawbt';
+  $('blocoBrowser').hidden = m !== 'browser';
 }
 
 /* =====================================================================
@@ -1486,6 +1565,10 @@ function linhasTalao(f) {
 }
 
 function desenharTalao(f) {
+  return desenharTalaoCanvas(f).toDataURL('image/png');
+}
+
+function desenharTalaoCanvas(f) {
   const W = pontosLargura(), M = 6;
   const fonte = (px, b) => `${b ? 'bold ' : ''}${px}px Arial, Helvetica, sans-serif`;
   const alt = { titulo: 44, centro: 30, sub: 36, linha: 30, sep: 18, grande: 46 };
@@ -1523,13 +1606,17 @@ function desenharTalao(f) {
   const img = ctx.getImageData(0, 0, W, H), d = img.data;
   for (let i = 0; i < d.length; i += 4) { const v = (d[i] + d[i + 1] + d[i + 2]) / 3 < 150 ? 0 : 255; d[i] = d[i + 1] = d[i + 2] = v; d[i + 3] = 255; }
   ctx.putImageData(img, 0, 0);
-  return c.toDataURL('image/png');
+  return c;
 }
 
 async function imprimirTalao(num) {
   const f = E.fechos.find(x => x.num === num);
   if (!f) return aviso('O fecho Nº ' + num + ' não existe.');
   try {
+    if (E.config.modoImpressao === 'rawbt') {
+      enviarRawBT(trabalhoESCPOS([desenharTalaoCanvas(f)]));
+      return;
+    }
     const src = desenharTalao(f);
     if (E.config.modoImpressao === 'qz') {
       await prepararImpressora();
@@ -1752,7 +1839,9 @@ $('ficheiroRestaurar').addEventListener('change', async e => {
   if (!await confirmar('Tem a certeza? Esta operação não se pode desfazer.<br>(Se quiser, faça antes uma CÓPIA DE SEGURANÇA dos dados atuais.)', 'Restaurar cópia', 'RESTAURAR', 'CANCELAR')) return;
   const chave = E.config.chaveQZ;
   const novo = { ...estadoInicial(), ...est };
-  novo.config = { ...CONFIG_PADRAO, ...est.config, chaveQZ: chave };
+  novo.config = { ...CONFIG_PADRAO, ...est.config, chaveQZ: chave,
+    // a forma de imprimir é deste aparelho (PC com QZ Tray, tablet com RawBT): não vem da cópia
+    modoImpressao: E.config.modoImpressao, modoDetetado: E.config.modoDetetado };
   novo.pedido = [];
   E = novo;
   await guardar();
@@ -1805,6 +1894,12 @@ async function arrancar() {
     await guardar();
   } else {
     E.config = { ...CONFIG_PADRAO, ...E.config };   // campos novos das versões seguintes
+  }
+  // Primeira vez num aparelho: Android → RawBT; os outros ficam como estão
+  if (!E.config.modoDetetado) {
+    if (/Android/i.test(navigator.userAgent)) E.config.modoImpressao = 'rawbt';
+    E.config.modoDetetado = true;
+    await guardar();
   }
   if (navigator.storage && navigator.storage.persist) navigator.storage.persist().catch(() => {});
   if ('serviceWorker' in navigator && location.protocol !== 'file:') navigator.serviceWorker.register('sw.js').catch(() => {});

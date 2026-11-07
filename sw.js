@@ -1,5 +1,5 @@
 /* Senhas — service worker: funciona sem internet e só mexe nas suas próprias caches */
-const CACHE = 'senhas-v3.2';
+const CACHE = 'senhas-v3.3';
 const FICHEIROS = ['./', './index.html', './app.js', './style.css', './manifest.webmanifest', './icon-192.png', './icon-512.png', './qz-tray.js', './xlsx.mini.min.js'];
 
 self.addEventListener('install', e => {
