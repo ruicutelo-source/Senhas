@@ -5,7 +5,7 @@
    A estrutura dos dados está pensada para passar mais tarde ao Firebase.
    ===================================================================== */
 
-const VERSAO = '3.3';
+const VERSAO = '3.4';
 const PROD_N = 14;
 const PAC_N = 2;
 const SENHA_INICIAL = '1234';
@@ -314,6 +314,7 @@ const acoes = {
   copiaSeguranca() { copiaSeguranca(); },
   novoEvento() { novoEvento(); },
   fecharCaixa() { fecharCaixa(); },
+  diagnosticoRawBT() { diagnosticoRawBT(); },
   anular() { anularVenda(); },
   reimprimir() { reimprimirPedido(); },
   reimprimirTalao(el) { reimprimirTalao(int(el.dataset.n)); },
@@ -834,13 +835,62 @@ function bytesRaster(canvas) {
   return partes;
 }
 
+// Modo «Compatível»: ESC * 33 (faixas de 24 pontos, densidade dupla), como as impressoras antigas
+function bytesColunas(canvas, densidade = 33) {
+  const w = canvas.width, h = canvas.height;
+  const d = canvas.getContext('2d').getImageData(0, 0, w, h).data;
+  const preto = (x, y) => y < h && d[(y * w + x) * 4] < 128;
+  const alt = densidade >= 32 ? 24 : 8, nb = alt / 8;
+  const partes = [new Uint8Array([0x1B, 0x33, alt])];          // espaço entre linhas = altura da faixa
+  for (let y0 = 0; y0 < h; y0 += alt) {
+    const b = new Uint8Array(5 + w * nb + 1);
+    b.set([0x1B, 0x2A, densidade, w & 255, w >> 8]);
+    for (let x = 0; x < w; x++) {
+      for (let k = 0; k < nb; k++) {
+        let v = 0;
+        for (let bit = 0; bit < 8; bit++) if (preto(x, y0 + k * 8 + bit)) v |= 0x80 >> bit;
+        b[5 + x * nb + k] = v;
+      }
+    }
+    b[b.length - 1] = 0x0A;
+    partes.push(b);
+  }
+  partes.push(new Uint8Array([0x1B, 0x32]));                   // espaço entre linhas normal
+  return partes;
+}
+
+// Diagnóstico: um talão pequeno com texto e três formas de imprimir imagem (poucos bytes)
+async function diagnosticoRawBT() {
+  if (!await confirmar('Imprimir o diagnóstico da impressora?<br>Sai um papel curto com 3 barras de teste.', 'Diagnóstico')) return;
+  const c = document.createElement('canvas');
+  c.width = 192; c.height = 24;
+  const x = c.getContext('2d');
+  x.fillStyle = '#fff'; x.fillRect(0, 0, 192, 24);
+  x.fillStyle = '#000';
+  for (let i = 0; i < 192; i += 16) x.fillRect(i, 0, 8, 24);  // riscas: 8 pretas, 8 brancas
+  const txt = t => Array.from(t, ch => ch.charCodeAt(0) & 0x7F);
+  const junta = arr => { const n = arr.reduce((s, p) => s + p.length, 0), o = new Uint8Array(n); let k = 0; for (const p of arr) { o.set(p, k); k += p.length; } return o; };
+  const partes = [
+    new Uint8Array([0x1B, 0x40]),
+    new Uint8Array(txt('DIAGNOSTICO SENHAS v' + VERSAO + '\n\n1) TEXTO: OK\n\n2) RASTER (GS v 0):\n')),
+    ...bytesRaster(c),
+    new Uint8Array(txt('\n3) COMPATIVEL (ESC * 33):\n')),
+    ...bytesColunas(c, 33),
+    new Uint8Array(txt('\n4) COMPATIVEL (ESC * 0):\n')),
+    ...bytesColunas(c, 0),
+    new Uint8Array(txt('\nFIM\n')),
+    new Uint8Array([0x1B, 0x64, 3, 0x1D, 0x56, 0x42, 0x00])
+  ];
+  try { enviarRawBT(junta(partes)); } catch (e) { aviso(msgErro(e), 'Diagnóstico'); }
+}
+
 // Um trabalho: para cada imagem → iniciar, imagem, avançar n linhas, cortar
 function trabalhoESCPOS(canvases) {
   const avanco = Math.min(10, Math.max(0, int(E.config.avanco)));
   const partes = [];
   for (const c of canvases) {
     partes.push(new Uint8Array([0x1B, 0x40]));
-    partes.push(...bytesRaster(c));
+    partes.push(...(E.config.imgModo === 'esc_asterisk' ? bytesColunas(c) : bytesRaster(c)));
     partes.push(new Uint8Array([0x1B, 0x64, avanco]));
     partes.push(new Uint8Array([0x1D, 0x56, 0x42, 0x00]));
   }
@@ -1034,6 +1084,7 @@ function mostrarBlocosImpressao() {
   $('soQZ').hidden = m !== 'qz';
   $('soQZ1').hidden = m !== 'qz';
   $('soRawBT').hidden = m !== 'rawbt';
+  $('btnDiagRawBT').hidden = m !== 'rawbt';
   $('blocoBrowser').hidden = m !== 'browser';
 }
 

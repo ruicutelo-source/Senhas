@@ -132,16 +132,16 @@
           <div id="blocoQZ">
             <div class="campos">
               <label>Avanço do papel antes do corte (linhas) <input id="defAvanco" type="number" min="0" max="10" step="1"></label>
-            </div>
-            <div class="campos" id="soQZ1">
-              <label>Impressora
-                <select id="defImpressora"></select>
-              </label>
               <label>Modo da imagem
                 <select id="defImgModo">
                   <option value="gs_v_0">Raster (recomendado)</option>
                   <option value="esc_asterisk">Compatível (impressoras antigas)</option>
                 </select>
+              </label>
+            </div>
+            <div class="campos" id="soQZ1">
+              <label>Impressora
+                <select id="defImpressora"></select>
               </label>
             </div>
             <div class="claridade">
@@ -184,6 +184,7 @@
             <button class="btn azul" data-acao="gravarImpressao">GRAVAR IMPRESSÃO</button>
             <button class="btn cinza-escuro" data-acao="preVisualizar">PRÉ-VISUALIZAR SENHA</button>
             <button class="btn cinza-escuro" data-acao="testeImpressao">IMPRIMIR SENHA DE TESTE</button>
+            <button class="btn cinza-escuro" data-acao="diagnosticoRawBT" id="btnDiagRawBT">DIAGNÓSTICO DA IMPRESSORA</button>
           </div>
         </div>
 
