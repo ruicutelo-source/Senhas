@@ -5,7 +5,7 @@
    A estrutura dos dados está pensada para passar mais tarde ao Firebase.
    ===================================================================== */
 
-const VERSAO = '3.4';
+const VERSAO = '3.5';
 const PROD_N = 14;
 const PAC_N = 2;
 const SENHA_INICIAL = '1234';
@@ -39,7 +39,7 @@ ea3ubs+lUfOXZrJO15vRzpMV0Fg1mqdg4t/YMyevI9g2u6ReKgtWcWs=
 const CONFIG_PADRAO = {
   evento: 'Magusto 2026/1', data: '2026-11-04', posto: 'Posto 1',
   largura: 80, alturaSenha: 45, logo: '', senhaHash: '',
-  modoImpressao: 'qz', impressora: 'BP-T3', avanco: 3, imgModo: 'gs_v_0', chaveQZ: '', claridade: 0, modoDetetado: false
+  modoImpressao: 'qz', impressora: 'BP-T3', avanco: 3, imgModo: 'gs_v_0', chaveQZ: '', claridade: 0, modoDetetado: false, espacoFaixas: 24
 };
 
 const CORES = {
@@ -813,7 +813,8 @@ async function imprimirQZ(nomes) {
 /* ---------- Tablet / telemóvel Android: RawBT ----------
    A app gera os comandos ESC/POS (os mesmos do QZ Tray: imagem GS v 0, avanço e corte)
    e entrega-os ao RawBT, que os passa à impressora sem os converter. */
-const RAWBT_MAX_SENHAS = 10;   // senhas por envio (cada envio vai num único endereço intent)
+const RAWBT_MAX_SENHAS = 10;
+const RAWBT_ENCHIMENTO = 4096;  // bytes 0 no início de cada envio   // senhas por envio (cada envio vai num único endereço intent)
 
 function bytesRaster(canvas) {
   const w = canvas.width, h = canvas.height, wb = Math.ceil(w / 8);
@@ -836,12 +837,14 @@ function bytesRaster(canvas) {
 }
 
 // Modo «Compatível»: ESC * 33 (faixas de 24 pontos, densidade dupla), como as impressoras antigas
-function bytesColunas(canvas, densidade = 33) {
+function bytesColunas(canvas, densidade = 33, espaco) {
   const w = canvas.width, h = canvas.height;
   const d = canvas.getContext('2d').getImageData(0, 0, w, h).data;
   const preto = (x, y) => y < h && d[(y * w + x) * 4] < 128;
   const alt = densidade >= 32 ? 24 : 8, nb = alt / 8;
-  const partes = [new Uint8Array([0x1B, 0x33, alt])];          // espaço entre linhas = altura da faixa
+  // espaço entre linhas = altura da faixa (em algumas impressoras a unidade não é 1 ponto: ajusta-se nas Definições)
+  if (espaco === undefined) espaco = alt === 24 ? Math.min(40, Math.max(10, int(E.config.espacoFaixas) || 24)) : alt;
+  const partes = [new Uint8Array([0x1B, 0x33, espaco])];
   for (let y0 = 0; y0 < h; y0 += alt) {
     const b = new Uint8Array(5 + w * nb + 1);
     b.set([0x1B, 0x2A, densidade, w & 255, w >> 8]);
@@ -862,25 +865,21 @@ function bytesColunas(canvas, densidade = 33) {
 // Diagnóstico: um talão pequeno com texto e três formas de imprimir imagem (poucos bytes)
 async function diagnosticoRawBT() {
   if (!await confirmar('Imprimir o diagnóstico da impressora?<br>Sai um papel curto com 3 barras de teste.', 'Diagnóstico')) return;
+  // bloco preto de 3 faixas: se ficarem riscas brancas entre faixas, o espaço é grande demais
   const c = document.createElement('canvas');
-  c.width = 192; c.height = 24;
+  c.width = 160; c.height = 72;
   const x = c.getContext('2d');
-  x.fillStyle = '#fff'; x.fillRect(0, 0, 192, 24);
-  x.fillStyle = '#000';
-  for (let i = 0; i < 192; i += 16) x.fillRect(i, 0, 8, 24);  // riscas: 8 pretas, 8 brancas
+  x.fillStyle = '#000'; x.fillRect(0, 0, 160, 72);
   const txt = t => Array.from(t, ch => ch.charCodeAt(0) & 0x7F);
   const junta = arr => { const n = arr.reduce((s, p) => s + p.length, 0), o = new Uint8Array(n); let k = 0; for (const p of arr) { o.set(p, k); k += p.length; } return o; };
   const partes = [
     new Uint8Array([0x1B, 0x40]),
-    new Uint8Array(txt('DIAGNOSTICO SENHAS v' + VERSAO + '\n\n1) TEXTO: OK\n\n2) RASTER (GS v 0):\n')),
-    ...bytesRaster(c),
-    new Uint8Array(txt('\n3) COMPATIVEL (ESC * 33):\n')),
-    ...bytesColunas(c, 33),
-    new Uint8Array(txt('\n4) COMPATIVEL (ESC * 0):\n')),
-    ...bytesColunas(c, 0),
-    new Uint8Array(txt('\nFIM\n')),
-    new Uint8Array([0x1B, 0x64, 3, 0x1D, 0x56, 0x42, 0x00])
+    new Uint8Array(txt('DIAGNOSTICO SENHAS v' + VERSAO + '\n0123456789 ABCDEFGHIJ\n\nESPACO ENTRE FAIXAS:\n'))
   ];
+  for (const n of [24, 22, 21, 20, 18]) {
+    partes.push(new Uint8Array(txt('\n' + n + ':\n')), ...bytesColunas(c, 33, n));
+  }
+  partes.push(new Uint8Array(txt('\nFIM\n')), new Uint8Array([0x1B, 0x64, 3, 0x1D, 0x56, 0x42, 0x00]));
   try { enviarRawBT(junta(partes)); } catch (e) { aviso(msgErro(e), 'Diagnóstico'); }
 }
 
@@ -910,7 +909,12 @@ function base64Bytes(bytes) {
 function enviarRawBT(bytes) {
   if (!/Android/i.test(navigator.userAgent))
     throw new Error('O modo RawBT só funciona num tablet ou telemóvel Android com a app RawBT instalada.');
-  location.href = 'intent:base64,' + base64Bytes(bytes) + '#Intent;scheme=rawbt;package=ru.a402d.rawbtprinter;end;';
+  // No arranque da ligação USB perdem-se os primeiros bytes: enviar primeiro «enchimento»
+  // (bytes 0, que a impressora ignora) e só depois os comandos verdadeiros, começando por ESC @.
+  const tudo = new Uint8Array(RAWBT_ENCHIMENTO + 2 + bytes.length);
+  tudo.set([0x1B, 0x40], RAWBT_ENCHIMENTO);
+  tudo.set(bytes, RAWBT_ENCHIMENTO + 2);
+  location.href = 'intent:base64,' + base64Bytes(tudo) + '#Intent;scheme=rawbt;package=ru.a402d.rawbtprinter;end;';
 }
 
 async function imprimirRawBT(nomes) {
@@ -1101,6 +1105,7 @@ function renderDefinicoes() {
   $('defModo').value = c.modoImpressao;
   $('defAvanco').value = c.avanco;
   $('defImgModo').value = c.imgModo;
+  $('defEspaco').value = c.espacoFaixas;
   $('defClaridade').value = c.claridade;
   atualizarClaridade();
   preencherImpressoras([]);
@@ -1176,12 +1181,15 @@ async function gravarImpressao() {
   if (alt < 25 || alt > 120) return aviso('A altura da senha tem de estar entre 25 e 120 mm.');
   const av = int($('defAvanco').value);
   if (av < 0 || av > 10) return aviso('O avanço do papel tem de estar entre 0 e 10 linhas.');
+  const ef = int($('defEspaco').value);
+  if (ef < 10 || ef > 40) return aviso('O espaço entre faixas tem de estar entre 10 e 40.');
   E.config.modoImpressao = $('defModo').value;
   E.config.largura = int($('defLargura').value);
   E.config.alturaSenha = alt;
   E.config.impressora = $('defImpressora').value || E.config.impressora;
   E.config.avanco = av;
   E.config.imgModo = $('defImgModo').value;
+  E.config.espacoFaixas = ef;
   E.config.claridade = int($('defClaridade').value);
   await guardar();
   aviso('Impressão gravada.' + (E.config.modoImpressao === 'qz' ? '\nImpressora: ' + E.config.impressora : ''));
