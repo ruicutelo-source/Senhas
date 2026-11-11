@@ -46,10 +46,13 @@
   <main>
     <!-- ===================== VENDA ===================== -->
     <section id="ecraVenda" class="ecra" hidden>
+      <button class="seta-quadro esq" data-acao="quadroAnterior" aria-label="Quadro anterior">&#9664;</button>
+      <button class="seta-quadro dir" data-acao="quadroSeguinte" aria-label="Quadro seguinte">&#9654;</button>
       <div class="painel">
         <div class="coluna-esq">
         <div class="cartao cartao-produtos">
-          <div class="rotulo">QUANTIDADE DE SENHAS</div>
+          <div class="faixa-quadro" id="quadroNome">VENDA DE SENHAS</div>
+          <div class="rotulo" id="rotuloQtd">QUANTIDADE DE SENHAS</div>
           <div class="linha-qtd">
             <button class="btn cinza qtd-btn" data-acao="qtdMenos" aria-label="Menos">&minus;</button>
             <input id="qtd" class="qtd" type="number" inputmode="numeric" min="0" max="999" value="0" aria-label="Quantidade">
@@ -60,26 +63,30 @@
           </div>
           <div class="grelha-grandes" id="grelhaGrandes"></div>
           <div class="grelha-fila" id="grelhaFila"></div>
-          <div class="ultimo"><b>Último pedido:</b> <span id="ultimoPedido"></span></div>
+          <div class="ultimo"><b id="ultimoRot">Último pedido:</b> <span id="ultimoPedido"></span></div>
         </div>
         <div class="cartao cartao-grafico">
-          <div class="grafico-cab">VENDAS DO TURNO POR ARTIGO <small>(desde o último fecho)</small></div>
+          <div class="grafico-cab" id="graficoCab">VENDAS DO TURNO POR ARTIGO <small>(desde o último fecho)</small></div>
           <div id="graficoArtigos"></div>
         </div>
         </div>
 
-        <div class="cartao cartao-pedido">
-          <div class="pedido-cabecalho">PEDIDO ATUAL</div>
+        <div class="cartao cartao-pedido" id="cartaoPedido">
+          <div class="pedido-cabecalho" id="pedidoCab">PEDIDO ATUAL</div>
           <div class="pedido-lista" id="pedidoLista"></div>
           <div class="pedido-total" id="pedidoTotal">TOTAL 0,00 €</div>
-          <div class="pedido-acoes">
-            <button class="btn verde imprimir" data-acao="imprimirPedido">IMPRIMIR PEDIDO</button>
+          <div class="pedido-acoes" id="pedidoAcoes">
+            <button class="btn verde imprimir" data-acao="imprimirPedido" id="btnPrincipal">IMPRIMIR PEDIDO</button>
             <button class="btn cinza" data-acao="removerUltimo">REMOVER ÚLTIMO</button>
             <button class="btn cinza-escuro" data-acao="limparPedido">LIMPAR</button>
           </div>
-          <div class="pedido-extra">
+          <div class="pedido-extra" id="pedidoExtra">
             <button class="btn contorno-vermelho" data-acao="anular">ANULAR VENDA</button>
-            <button class="btn contorno-escuro" data-acao="reimprimir">REIMPRIMIR PEDIDO</button>
+            <button class="btn contorno-escuro" data-acao="reimprimir" id="btnReimprimir">REIMPRIMIR PEDIDO</button>
+          </div>
+          <div class="pedido-acoes-anular" id="pedidoAcoesAnular" hidden>
+            <button class="btn cinza" data-acao="anularCancelar">CANCELAR</button>
+            <button class="btn vermelho" data-acao="anularConfirmar">ANULAR ESTA VENDA</button>
           </div>
         </div>
       </div>
@@ -94,7 +101,8 @@
     <section id="ecraHistorico" class="ecra" hidden>
       <div class="historico">
         <div class="abas">
-          <button class="aba" id="histAbaRegisto" data-acao="histAba" data-aba="registo">REGISTO DE VENDAS</button>
+          <button class="aba" id="histAbaRegisto" data-acao="histAba" data-aba="registo">REGISTO DE SENHAS</button>
+          <button class="aba" id="histAbaMerch" data-acao="histAba" data-aba="merch">REGISTO DE MERCHANDISING</button>
           <button class="aba" id="histAbaFechos" data-acao="histAba" data-aba="fechos">FECHOS DE CAIXA</button>
         </div>
         <div class="cartao" id="histConteudo"></div>
@@ -200,7 +208,7 @@
         </div>
 
         <div class="cartao bloco">
-          <h2>Produtos <small>(1 e 2 = botões grandes; 3 a 8 = 1.ª fila; 9 a 14 = 2.ª fila)</small></h2>
+          <h2>Produtos das senhas <small>(1 e 2 = botões grandes; 3 a 8 = 1.ª fila; 9 a 14 = 2.ª fila; 15 a 20 = 3.ª fila)</small></h2>
           <div class="tabela-rolar">
             <table class="tabela produtos">
               <thead><tr><th>Nº</th><th>Produto</th><th>Preço normal (€)</th><th>Prefixo</th><th>Cor</th><th>Ativo</th><th>Usa pacotes</th><th>Próximo nº</th></tr></thead>
@@ -209,6 +217,18 @@
           </div>
           <p class="nota">Nome vazio = o botão não aparece. «Usa pacotes» só nos Finos. O próximo nº é atualizado sozinho; não o altere a meio de um evento.</p>
           <button class="btn azul" data-acao="gravarProdutos">GRAVAR PRODUTOS</button>
+        </div>
+
+        <div class="cartao bloco">
+          <h2>Artigos de merchandising <small>(mesma posição dos botões: 1 e 2 grandes; 3 a 20 em 3 filas)</small></h2>
+          <div class="tabela-rolar">
+            <table class="tabela produtos">
+              <thead><tr><th>Nº</th><th>Artigo</th><th>Preço (€)</th><th>Cor</th><th>Ativo</th></tr></thead>
+              <tbody id="defMerch"></tbody>
+            </table>
+          </div>
+          <p class="nota">Merchandising: venda à unidade, sem pacotes e sem impressão (o botão REGISTAR VENDA pergunta se já recebeu do cliente). Tem registo próprio e parte própria no fecho de caixa. Nome vazio = o botão não aparece.</p>
+          <button class="btn azul" data-acao="gravarMerch">GRAVAR MERCHANDISING</button>
         </div>
 
         <div class="cartao bloco">

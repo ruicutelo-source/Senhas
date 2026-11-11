@@ -5,8 +5,8 @@
    A estrutura dos dados está pensada para passar mais tarde ao Firebase.
    ===================================================================== */
 
-const VERSAO = '3.5';
-const PROD_N = 14;
+const VERSAO = '4.0';
+const PROD_N = 20;
 const PAC_N = 2;
 const SENHA_INICIAL = '1234';
 
@@ -51,6 +51,7 @@ const CORES = {
 let E = null;          // estado completo (o que é gravado)
 let modo = null;       // 'VENDEDOR' | 'ADMIN'
 let ecra = 'entrada';  // ecrã visível
+let anulando = null;   // venda escolhida para anular (mostrada no quadro do pedido)
 
 /* =====================================================================
    Armazenamento (IndexedDB)
@@ -105,25 +106,52 @@ function estadoInicial() {
     ['Chouriço Assado', 5, 'P03', 'Turquesa', false, false],
     ['Salgados', 4, 'P04', 'Rosa', true, false]
   ];
-  const coresResto = ['Castanho', 'Azul claro', 'Dourado', 'Vermelho', 'Verde', 'Roxo', 'Turquesa', 'Rosa'];
   const produtos = [];
   for (let i = 0; i < PROD_N; i++) {
     const b = base[i];
     produtos.push(b
       ? { nome: b[0], preco: b[1], prefixo: b[2], cor: b[3], ativo: b[4], usaPacotes: b[5], prox: 1 }
-      : { nome: '', preco: 0, prefixo: 'P' + String(i - 1).padStart(2, '0'), cor: coresResto[i - 6], ativo: false, usaPacotes: false, prox: 1 });
+      : produtoVazio(i));
   }
+  const produtosMerch = [];
+  for (let i = 0; i < PROD_N; i++) produtosMerch.push(merchVazio(i));
   return {
-    versaoDados: 1,
+    versaoDados: 2,
     config: { ...CONFIG_PADRAO },
     pacotes: [{ senhas: 8, valor: 10 }, { senhas: 18, valor: 20 }],
     produtos,
-    registo: [],        // uma linha por linha de pedido impressa
-    fechos: [],         // Fase 2
-    fechosDetalhe: [],  // Fase 2
-    pedido: [],         // pedido em curso
-    ultimoPedido: ''
+    registo: [],        // uma linha por linha de pedido impressa (senhas)
+    fechos: [],
+    fechosDetalhe: [],
+    pedido: [],         // pedido em curso (senhas)
+    ultimoPedido: '',
+    produtosMerch,      // merchandising: produtos próprios
+    registoMerch: [],   // merchandising: uma linha por linha de venda registada
+    pedidoMerch: [],    // merchandising: venda em curso
+    ultimoMerch: ''
   };
+}
+
+const CORES_RESTO = ['Castanho', 'Azul claro', 'Dourado', 'Vermelho', 'Verde', 'Roxo', 'Turquesa', 'Rosa'];
+function produtoVazio(i) {
+  return { nome: '', preco: 0, prefixo: 'P' + String(i - 1).padStart(2, '0'), cor: CORES_RESTO[(i - 6 + CORES_RESTO.length * 3) % CORES_RESTO.length],
+    ativo: false, usaPacotes: false, prox: 1 };
+}
+function merchVazio(i) {
+  return { nome: '', preco: 0, cor: Object.keys(CORES)[i % Object.keys(CORES).length], ativo: false };
+}
+
+// Dados de versões anteriores (ou de uma cópia de segurança antiga): acrescentar o que falta
+function migrar(est) {
+  est.produtos = est.produtos || [];
+  while (est.produtos.length < PROD_N) est.produtos.push(produtoVazio(est.produtos.length));
+  est.produtosMerch = est.produtosMerch || [];
+  while (est.produtosMerch.length < PROD_N) est.produtosMerch.push(merchVazio(est.produtosMerch.length));
+  for (const k of ['registo', 'fechos', 'fechosDetalhe', 'pedido', 'registoMerch', 'pedidoMerch']) if (!Array.isArray(est[k])) est[k] = [];
+  if (typeof est.ultimoPedido !== 'string') est.ultimoPedido = '';
+  if (typeof est.ultimoMerch !== 'string') est.ultimoMerch = '';
+  est.versaoDados = 2;
+  return est;
 }
 
 /* =====================================================================
@@ -148,7 +176,16 @@ async function hash(texto) {
 /* =====================================================================
    Produtos e pacotes
    ===================================================================== */
-const prod = i => E.produtos[i];
+// Dois quadros de venda: 'senhas' (imprime senhas) e 'merch' (merchandising: só regista)
+let quadro = 'senhas';
+const MERCH = () => quadro === 'merch';
+const listaProd = () => (MERCH() ? E.produtosMerch : E.produtos);
+const ped = () => (MERCH() ? E.pedidoMerch : E.pedido);
+function setPed(a) { if (MERCH()) E.pedidoMerch = a; else E.pedido = a; }
+const regQ = () => (MERCH() ? E.registoMerch : E.registo);
+const unid = (n, q = quadro) => q === 'merch' ? (n === 1 ? 'unidade' : 'unidades') : (n === 1 ? 'senha' : 'senhas');
+
+const prod = i => listaProd()[i];
 const prodExiste = i => !!(prod(i) && prod(i).nome.trim());
 const corProd = i => CORES[prod(i).cor] || '#7f8c8d';
 
@@ -157,13 +194,13 @@ function pacUnit(k) { const p = E.pacotes[k - 1]; return p.senhas > 0 ? p.valor 
 
 // Produto dos botões PACOTE 1 / PACOTE 2: o 1.º com «Usa pacotes» (-1 = nenhum)
 function prodPacotes() {
-  for (let i = 0; i < PROD_N; i++) if (prodExiste(i) && prod(i).usaPacotes) return i;
+  for (let i = 0; i < PROD_N; i++) { const p = E.produtos[i]; if (p && p.nome.trim() && p.usaPacotes) return i; }
   return -1;
 }
 
 function descontoPacote(i, k) {
   const p = E.pacotes[k - 1];
-  return Math.max(0, r2(r2(p.senhas * prod(i).preco) - p.valor));
+  return Math.max(0, r2(r2(p.senhas * E.produtos[i].preco) - p.valor));
 }
 
 // Divide uma quantidade em partes (cada parte = uma linha do pedido)
@@ -172,7 +209,7 @@ function dividirQtd(i, qtd) {
   const partes = [];
   let resto = qtd;
   const p = prod(i);
-  if (p.usaPacotes) {
+  if (p.usaPacotes && !MERCH()) {
     const ordem = [1, 2].filter(pacValido).sort((a, b) => E.pacotes[b - 1].senhas - E.pacotes[a - 1].senhas);
     for (const k of ordem) {
       const s = E.pacotes[k - 1].senhas;
@@ -182,7 +219,7 @@ function dividirQtd(i, qtd) {
       }
     }
   }
-  if (resto > 0) partes.push({ fmt: p.usaPacotes ? 'Avulso' : 'Normal', qtd: resto, valor: r2(resto * p.preco), desc: 0 });
+  if (resto > 0) partes.push({ fmt: p.usaPacotes && !MERCH() ? 'Avulso' : 'Normal', qtd: resto, valor: r2(resto * p.preco), desc: 0 });
   return partes;
 }
 
@@ -211,6 +248,20 @@ function verificarProdutos(lista) {
       if (!b.nome.trim()) continue;
       if (a.nome.trim().toLowerCase() === b.nome.trim().toLowerCase()) erros.push(`Nome repetido: ${a.nome} (nº ${i + 1} e ${j + 1}).`);
       if (a.prefixo.trim().toLowerCase() === b.prefixo.trim().toLowerCase()) erros.push(`Prefixo repetido: ${a.prefixo} (nº ${i + 1} e ${j + 1}).`);
+    }
+  }
+  return erros;
+}
+
+function verificarMerch(lista) {
+  const erros = [];
+  for (let i = 0; i < PROD_N; i++) {
+    const a = lista[i];
+    if (!a.nome.trim()) continue;
+    if (a.nome.length > 20) erros.push(`Nº ${i + 1}: o nome tem mais de 20 letras.`);
+    for (let j = i + 1; j < PROD_N; j++) {
+      const b = lista[j];
+      if (b.nome.trim() && a.nome.trim().toLowerCase() === b.nome.trim().toLowerCase()) erros.push(`Nome repetido: ${a.nome} (nº ${i + 1} e ${j + 1}).`);
     }
   }
   return erros;
@@ -339,7 +390,11 @@ const acoes = {
   oferta() { ofertaUltimo(); },
   removerUltimo() { removerUltimo(); },
   limparPedido() { limparPedido(); },
-  imprimirPedido() { imprimirPedido(); },
+  imprimirPedido() { botaoPrincipal(); },
+  quadroAnterior() { mudarQuadro(); },
+  quadroSeguinte() { mudarQuadro(); },
+  anularCancelar() { cancelarAnulacao(); },
+  anularConfirmar() { confirmarAnulacao(); },
 
   // ----- definições -----
   gravarEvento() { gravarEvento(); },
@@ -352,6 +407,7 @@ const acoes = {
   testeImpressao() { testeImpressao(); },
   gravarPacotes() { gravarPacotes(); },
   gravarProdutos() { gravarProdutos(); },
+  gravarMerch() { gravarMerch(); },
   mudarPalavraPasse() { mudarPalavraPasse(); }
 };
 
@@ -374,23 +430,30 @@ function renderEntrada() {
   $('versaoEntrada').textContent = 'Senhas v' + VERSAO + ' · dados guardados neste computador';
 }
 
-function turnoAtual() {
+function turnoAtual(reg = E.registo) {
   let senhas = 0, valor = 0;
-  for (const l of E.registo) if (l.estado === 'Válida' && !l.fecho) { senhas += l.qtd; valor += l.valor; }
+  for (const l of reg) if (l.estado === 'Válida' && !l.fecho) { senhas += l.qtd; valor += l.valor; }
   return { senhas, valor: r2(valor) };
 }
 
 function renderTopo() {
   $('topoEvento').textContent = E.config.evento;
   $('topoData').textContent = dataPT(E.config.data) + (E.config.posto ? ' · ' + E.config.posto : '');
-  const t = turnoAtual();
-  $('topoTurno').textContent = `TURNO: ${t.senhas} senhas · ${euro(t.valor)}`;
+  const t = turnoAtual(), m = turnoAtual(E.registoMerch);
+  $('topoTurno').textContent = `TURNO: ${t.senhas} senhas · ${euro(t.valor)}` + (m.senhas ? ` · MERCH: ${m.senhas} · ${euro(m.valor)}` : '');
 }
 
 /* =====================================================================
    VENDA
    ===================================================================== */
 function renderVenda() {
+  const merch = MERCH();
+  $('ecraVenda').classList.toggle('merch', merch);
+  $('quadroNome').textContent = merch ? 'MERCHANDISING' : 'VENDA DE SENHAS';
+  $('rotuloQtd').textContent = merch ? 'QUANTIDADE' : 'QUANTIDADE DE SENHAS';
+  $('btnPrincipal').textContent = merch ? 'REGISTAR VENDA' : 'IMPRIMIR PEDIDO';
+  $('btnReimprimir').hidden = merch;
+  $('graficoCab').innerHTML = (merch ? 'MERCHANDISING DO TURNO POR ARTIGO' : 'VENDAS DO TURNO POR ARTIGO') + ' <small>(desde o último fecho)</small>';
   const grandes = $('grelhaGrandes'), fila = $('grelhaFila');
   grandes.innerHTML = ''; fila.innerHTML = '';
   for (let i = 0; i < PROD_N; i++) {
@@ -412,13 +475,15 @@ function renderVenda() {
   const ip = prodPacotes();
   for (let k = 1; k <= PAC_N; k++) {
     const b = $('btnPac' + k);
+    b.classList.toggle('escondido', merch);
     const p = E.pacotes[k - 1];
     b.innerHTML = `PACOTE ${k}<br><small>${pacValido(k) ? p.senhas + ' = ' + euroCurto(p.valor) : 'não definido'}</small>`;
     const ok = ip >= 0 && pacValido(k);
-    b.style.background = ok ? corProd(ip) : '';
+    b.style.background = ok ? (CORES[E.produtos[ip].cor] || '#7f8c8d') : '';
     b.classList.toggle('desligado', !ok);
   }
-  $('ultimoPedido').textContent = E.ultimoPedido || '';
+  $('ultimoRot').textContent = merch ? 'Última venda:' : 'Último pedido:';
+  $('ultimoPedido').textContent = (merch ? E.ultimoMerch : E.ultimoPedido) || '';
   renderGraficoArtigos();
   renderPedido();
 }
@@ -428,14 +493,14 @@ function renderGraficoArtigos() {
   const caixa = $('graficoArtigos');
   if (!caixa) return;
   const m = new Map();
-  for (const l of E.registo) {
+  for (const l of regQ()) {
     if (l.fecho || l.estado !== 'Válida') continue;
     const a = m.get(l.produto) || { nome: l.produto, prodN: l.prodN, senhas: 0, valor: 0 };
     a.senhas += l.qtd; a.valor = r2(a.valor + l.valor);
     m.set(l.produto, a);
   }
   const lista = Array.from(m.values()).sort((a, b) => b.senhas - a.senhas || b.valor - a.valor);
-  if (!lista.length) { caixa.innerHTML = '<div class="ga-vazio">Ainda não há vendas neste turno. O gráfico aparece com o primeiro pedido impresso.</div>'; return; }
+  if (!lista.length) { caixa.innerHTML = `<div class="ga-vazio">Ainda não há vendas neste turno. O gráfico aparece com ${MERCH() ? 'a primeira venda registada' : 'o primeiro pedido impresso'}.</div>`; return; }
   const max = lista[0].senhas || 1;
   const cor = a => {
     const i = a.prodN - 1;
@@ -444,7 +509,7 @@ function renderGraficoArtigos() {
   caixa.innerHTML = lista.map(a =>
     `<div class="ga-linha"><div class="ga-nome">${esc(a.nome)}</div>` +
     `<div class="ga-pista"><div class="ga-barra" style="width:${Math.max(1.5, a.senhas / max * 100)}%;background:${cor(a)}"></div></div>` +
-    `<div class="ga-valor"><b>${a.senhas}</b> ${a.senhas === 1 ? 'senha' : 'senhas'} · ${euro(a.valor)}</div></div>`).join('');
+    `<div class="ga-valor"><b>${a.senhas}</b> ${unid(a.senhas)} · ${euro(a.valor)}</div></div>`).join('');
 }
 
 // Letra dos botões: a palavra mais comprida tem de caber numa linha
@@ -463,29 +528,39 @@ function ajustarLetraBotoes() {
 }
 window.addEventListener('resize', () => { if (ecra === 'venda') ajustarLetraBotoes(); });
 
+// Setas laterais: passar de um quadro para o outro (só 2 quadros: as duas setas alternam)
+function mudarQuadro() {
+  if (anulando) return aviso('Está a meio de uma anulação. Termine-a ou carregue em CANCELAR.');
+  quadro = MERCH() ? 'senhas' : 'merch';
+  $('qtd').value = 0;
+  renderVenda();
+}
+
 function lerQtd() { const q = int($('qtd').value); return Math.min(999, Math.max(0, q)); }
 function mudarQtd(d) { $('qtd').value = Math.min(999, Math.max(0, lerQtd() + d)); }
 
-function novoGrupo() { return E.pedido.length ? E.pedido[E.pedido.length - 1].grupo + 1 : 1; }
+function novoGrupo() { const P = ped(); return P.length ? P[P.length - 1].grupo + 1 : 1; }
 
 async function adicionarProduto(i) {
   if (!prodExiste(i)) return;
   const p = prod(i);
   if (!p.ativo) return aviso(p.nome.toUpperCase() + ' está indisponível.');
   const qtd = lerQtd();
-  if (qtd < 1) return aviso('Indique primeiro a quantidade de senhas e depois clique no produto.');
+  if (qtd < 1) return aviso(`Indique primeiro a quantidade ${MERCH() ? '' : 'de senhas '}e depois clique no produto.`);
+  if (anulando) return aviso('Está a meio de uma anulação. Termine-a ou carregue em CANCELAR.');
   const g = novoGrupo();
   for (const parte of dividirQtd(i, qtd))
-    E.pedido.push({ prod: i, qtd: parte.qtd, fmt: parte.fmt, valor: parte.valor, desc: parte.desc, motivo: '', grupo: g });
+    ped().push({ prod: i, qtd: parte.qtd, fmt: parte.fmt, valor: parte.valor, desc: parte.desc, motivo: '', grupo: g });
   $('qtd').value = 0;
   renderPedido();
   guardar();
 }
 
 async function adicionarPacote(k) {
+  if (MERCH() || anulando) return;
   const i = prodPacotes();
   if (i < 0) return aviso('Nenhum produto tem «Usa pacotes» ligado nas Definições.');
-  if (!prod(i).ativo) return aviso(prod(i).nome.toUpperCase() + ' está indisponível.');
+  if (!E.produtos[i].ativo) return aviso(E.produtos[i].nome.toUpperCase() + ' está indisponível.');
   if (!pacValido(k)) return aviso('O Pacote ' + k + ' não está definido nas Definições.');
   const p = E.pacotes[k - 1];
   E.pedido.push({ prod: i, qtd: p.senhas, fmt: 'Pacote ' + k, valor: p.valor, desc: descontoPacote(i, k), motivo: '', grupo: novoGrupo() });
@@ -494,54 +569,81 @@ async function adicionarPacote(k) {
 }
 
 function linhasUltimoGrupo() {
-  if (!E.pedido.length) return [];
-  const g = E.pedido[E.pedido.length - 1].grupo;
-  return E.pedido.filter(l => l.grupo === g);
+  const P = ped();
+  if (!P.length) return [];
+  const g = P[P.length - 1].grupo;
+  return P.filter(l => l.grupo === g);
 }
 
 async function ofertaUltimo() {
+  if (anulando) return;
   const ult = linhasUltimoGrupo();
   if (!ult.length) return aviso('Primeiro indique a quantidade e clique no produto.\nDepois carregue em OFERTA.', 'Oferta');
   if (ult[0].fmt === 'Oferta') return aviso('O último produto do pedido já é uma oferta.', 'Oferta');
   const i = ult[0].prod;
   const q = ult.reduce((s, l) => s + l.qtd, 0);
   const motivo = await perguntar(
-    `Oferecer <b>${q}</b> senha(s) de <b>${esc(prod(i).nome.toUpperCase())}</b>.<br>Indique o motivo (ex.: oferta à organização):`,
+    `Oferecer <b>${q}</b> ${unid(q)} de <b>${esc(prod(i).nome.toUpperCase())}</b>.<br>Indique o motivo (ex.: oferta à organização):`,
     'Oferta', { max: 80, placeholder: 'Motivo da oferta' });
   if (motivo === null) return;
   if (!motivo) return aviso('Sem motivo, a oferta não foi feita.', 'Oferta');
   const g = ult[0].grupo;
-  E.pedido = E.pedido.filter(l => l.grupo !== g);
-  E.pedido.push({ prod: i, qtd: q, fmt: 'Oferta', valor: 0, desc: 0, motivo, grupo: g });
+  setPed(ped().filter(l => l.grupo !== g));
+  ped().push({ prod: i, qtd: q, fmt: 'Oferta', valor: 0, desc: 0, motivo, grupo: g });
   renderPedido();
   guardar();
 }
 
 async function removerUltimo() {
-  if (!E.pedido.length) return aviso('O pedido está vazio.');
-  const g = E.pedido[E.pedido.length - 1].grupo;
-  E.pedido = E.pedido.filter(l => l.grupo !== g);
+  if (anulando) return;
+  const P = ped();
+  if (!P.length) return aviso('O pedido está vazio.');
+  const g = P[P.length - 1].grupo;
+  setPed(P.filter(l => l.grupo !== g));
   renderPedido();
   guardar();
 }
 
 async function limparPedido() {
-  if (!E.pedido.length) return;
+  if (anulando) return;
+  if (!ped().length) return;
   if (!await confirmar('Apagar o pedido todo?')) return;
-  E.pedido = [];
+  setPed([]);
   renderPedido();
   guardar();
 }
 
-function totalPedido() { return r2(E.pedido.reduce((s, l) => s + l.valor, 0)); }
+function totalPedido() { return r2(ped().reduce((s, l) => s + l.valor, 0)); }
 
 function renderPedido() {
   const caixa = $('pedidoLista');
-  if (!E.pedido.length) {
-    caixa.innerHTML = '<div class="pedido-vazio">Pedido vazio.<br>Indique a quantidade e clique num produto.</div>';
+  const emAnul = !!anulando && anulando.quadro === quadro;
+  $('cartaoPedido').classList.toggle('a-anular', emAnul);
+  $('pedidoAcoes').hidden = emAnul;
+  $('pedidoExtra').hidden = emAnul;
+  $('pedidoAcoesAnular').hidden = !emAnul;
+  if (emAnul) {
+    const A = anulando;
+    $('pedidoCab').textContent = 'VENDA A ANULAR';
+    const l0 = A.linhas[0];
+    let h = `<div class="anul-info"><b>${A.tipo === 'pedido' ? 'Pedido Nº ' + l0.pedido : 'Linha Nº ' + l0.venda + ' (pedido ' + l0.pedido + ')'}</b><br>` +
+      `${dataHoraPT(l0.data)} · ${l0.fecho ? 'Fecho de caixa Nº ' + l0.fecho + ' (turno já fechado)' : 'Turno atual'}</div>`;
+    h += `<table><thead><tr><th>Produto</th><th class="tipo">Tipo</th><th class="num">Qtd</th><th class="num">Valor</th></tr></thead><tbody>`;
+    for (const l of A.linhas) {
+      h += `<tr${l.formato === 'Oferta' ? ' class="of"' : ''}><td>${esc(l.produto)}${A.quadro === 'senhas' ? `<br><small>${esc(l.ini)} a ${esc(l.fim)}</small>` : ''}</td>` +
+        `<td class="tipo">${esc(l.formato)}</td><td class="num">${l.qtd}</td><td class="num">${euro(l.valor)}</td></tr>`;
+    }
+    caixa.innerHTML = h + '</tbody></table>';
+    $('pedidoTotal').textContent = 'VALOR ' + euro(A.linhas.reduce((s, l) => s + l.valor, 0));
+    return;
+  }
+  $('pedidoCab').textContent = MERCH() ? 'VENDA ATUAL · MERCHANDISING' : 'PEDIDO ATUAL';
+  const P = ped();
+  if (!P.length) {
+    caixa.innerHTML = `<div class="pedido-vazio">${MERCH() ? 'Venda vazia' : 'Pedido vazio'}.<br>Indique a quantidade e clique num produto.</div>`;
   } else {
     let h = '<table><thead><tr><th>Produto</th><th class="tipo">Tipo</th><th class="num">Qtd</th><th class="num">Valor</th></tr></thead><tbody>';
-    for (const l of E.pedido) {
+    for (const l of P) {
       h += `<tr${l.fmt === 'Oferta' ? ' class="of"' : ''}><td>${esc(prod(l.prod).nome)}</td>` +
         `<td class="tipo">${esc(l.fmt)}</td><td class="num">${l.qtd}</td><td class="num">${euro(l.valor)}</td></tr>`;
     }
@@ -551,7 +653,50 @@ function renderPedido() {
   $('pedidoTotal').textContent = 'TOTAL ' + euro(totalPedido());
 }
 
+// IMPRIMIR PEDIDO (senhas) ou REGISTAR VENDA (merchandising)
+function botaoPrincipal() { return MERCH() ? registarMerch() : imprimirPedido(); }
+
+async function registarMerch() {
+  const P = E.pedidoMerch;
+  if (!P.length) return aviso('A venda está vazia.\nIndique a quantidade e clique num produto.');
+  const erros = verificarMerch(E.produtosMerch);
+  if (erros.length) return aviso('A tabela de produtos de merchandising tem problemas:\n\n' + erros.join('\n') + '\n\nPeça ao administrador para corrigir.');
+  for (const l of P) {
+    const p = E.produtosMerch[l.prod];
+    if (!p || !p.nome.trim() || !p.ativo) return aviso(`O artigo ${p && p.nome ? p.nome : 'nº ' + (l.prod + 1)} está indisponível.\nUse REMOVER ÚLTIMO ou LIMPAR para o tirar da venda.`);
+  }
+  const total = totalPedido();
+  const unidades = P.reduce((s, l) => s + l.qtd, 0);
+  let h = '<table class="resumo">';
+  for (const l of P) {
+    h += `<tr><td><b>${esc(E.produtosMerch[l.prod].nome.toUpperCase())}</b>${l.fmt === 'Oferta' ? ' · Oferta' : ''}</td><td class="num">${l.qtd} ${unid(l.qtd, 'merch')}</td><td class="num">${euro(l.valor)}</td></tr>`;
+    if (l.fmt === 'Oferta') h += `<tr><td colspan="3"><i>Motivo: ${esc(l.motivo)}</i></td></tr>`;
+  }
+  h += `</table><p>Total: <b>${unidades}</b> ${unid(unidades, 'merch')}</p><div class="cobrar">A RECEBER: ${euro(total)}</div>` +
+    `<p><b>Já recebeu ${euro(total)} do cliente?</b></p>`;
+  if (!await janela({ titulo: 'Registar venda · Merchandising', html: h, botoes: [{ texto: 'NÃO', classe: 'cinza', valor: false }, { texto: 'SIM, JÁ RECEBI', classe: 'verde', valor: true }] })) return;
+
+  const agora = new Date();
+  const nPed = E.registoMerch.reduce((m, l) => Math.max(m, l.pedido), 0) + 1;
+  let nVenda = E.registoMerch.reduce((m, l) => Math.max(m, l.venda), 0);
+  for (const l of P) {
+    const p = E.produtosMerch[l.prod];
+    E.registoMerch.push({
+      venda: ++nVenda, data: agora.toISOString(), produto: p.nome, prodN: l.prod + 1, qtd: l.qtd,
+      preco: l.fmt === 'Oferta' ? 0 : p.preco, valor: l.valor, desconto: 0,
+      estado: 'Válida', fecho: null, anuladaEm: null, pedido: nPed,
+      formato: l.fmt, motivo: l.motivo || '', posto: E.config.posto || ''
+    });
+  }
+  E.ultimoMerch = `Nº ${nPed} · ${P.length} linha(s) · ${unidades} ${unid(unidades, 'merch')} · ${euro(total)} · ${horaPT(agora)}`;
+  E.pedidoMerch = [];
+  await guardar();
+  renderVenda();
+  renderTopo();
+}
+
 async function imprimirPedido() {
+  if (anulando) return;
   if (!E.pedido.length) return aviso('O pedido está vazio.\nIndique a quantidade e clique num produto.');
   const erros = verificarProdutos(E.produtos);
   if (erros.length) return aviso('A tabela de produtos tem problemas:\n\n' + erros.join('\n') + '\n\nPeça ao administrador para corrigir.');
@@ -993,7 +1138,7 @@ async function imprimirSenhas(nomes) {
 
 function nomeMaisComprido() {
   let m = 'TESTE';
-  for (let i = 0; i < PROD_N; i++) if (prodExiste(i) && prod(i).nome.length > m.length) m = prod(i).nome;
+  for (const p of E.produtos) if (p.nome.trim() && p.nome.length > m.length) m = p.nome;
   return m;
 }
 
@@ -1130,7 +1275,7 @@ function renderDefinicoes() {
   const opcoes = Object.keys(CORES).map(n => `<option>${n}</option>`).join('');
   h = '';
   for (let i = 0; i < PROD_N; i++) {
-    const p = prod(i);
+    const p = E.produtos[i];
     h += `<tr><td>${i + 1}</td>` +
       `<td><input id="pNome${i}" maxlength="20" value="${esc(p.nome)}"></td>` +
       `<td><input id="pPreco${i}" type="number" min="0" step="0.01" value="${p.preco}"></td>` +
@@ -1142,9 +1287,26 @@ function renderDefinicoes() {
   }
   $('defProdutos').innerHTML = h;
   for (let i = 0; i < PROD_N; i++) {
-    $('pCor' + i).value = prod(i).cor;
-    $('pCor' + i).style.borderLeft = '8px solid ' + corProd(i);
+    $('pCor' + i).value = E.produtos[i].cor;
+    $('pCor' + i).style.borderLeft = '8px solid ' + (CORES[E.produtos[i].cor] || '#999');
     $('pCor' + i).onchange = e => { e.target.style.borderLeft = '8px solid ' + (CORES[e.target.value] || '#999'); };
+  }
+
+  // merchandising
+  h = '';
+  for (let i = 0; i < PROD_N; i++) {
+    const p = E.produtosMerch[i];
+    h += `<tr><td>${i + 1}</td>` +
+      `<td><input id="mNome${i}" maxlength="20" value="${esc(p.nome)}"></td>` +
+      `<td><input id="mPreco${i}" type="number" min="0" step="0.01" value="${p.preco}"></td>` +
+      `<td><select id="mCor${i}">${opcoes}</select></td>` +
+      `<td><input id="mAtivo${i}" type="checkbox"${p.ativo ? ' checked' : ''}></td></tr>`;
+  }
+  $('defMerch').innerHTML = h;
+  for (let i = 0; i < PROD_N; i++) {
+    $('mCor' + i).value = E.produtosMerch[i].cor;
+    $('mCor' + i).style.borderLeft = '8px solid ' + (CORES[E.produtosMerch[i].cor] || '#999');
+    $('mCor' + i).onchange = e => { e.target.style.borderLeft = '8px solid ' + (CORES[e.target.value] || '#999'); };
   }
   $('pwAtual').value = $('pwNova').value = $('pwNova2').value = '';
   $('versaoDef').textContent = 'Senhas v' + VERSAO + ' · dados guardados neste computador';
@@ -1302,6 +1464,21 @@ async function gravarProdutos() {
   aviso(msg);
 }
 
+async function gravarMerch() {
+  const lista = [];
+  for (let i = 0; i < PROD_N; i++) {
+    const preco = r2(num($('mPreco' + i).value));
+    if (preco < 0) return aviso(`Nº ${i + 1}: o preço não pode ser negativo.`);
+    lista.push({ nome: $('mNome' + i).value.trim(), preco, cor: $('mCor' + i).value, ativo: $('mAtivo' + i).checked });
+  }
+  const erros = verificarMerch(lista);
+  if (erros.length) return aviso('Corrija antes de gravar:\n\n' + erros.join('\n'));
+  if (E.pedidoMerch.length && !await confirmar('Há uma venda de merchandising por registar. Gravar os artigos na mesma?')) return;
+  E.produtosMerch = lista;
+  await guardar();
+  aviso('Artigos de merchandising gravados.');
+}
+
 async function mudarPalavraPasse() {
   const atual = $('pwAtual').value, nova = $('pwNova').value, nova2 = $('pwNova2').value;
   if (await hash(atual) !== E.config.senhaHash) return aviso('A palavra-passe atual está errada.');
@@ -1349,7 +1526,75 @@ function escolherDaLista(titulo, texto, itens) {
 }
 
 const linhasTurno = () => E.registo.filter(l => !l.fecho);
+const linhasTurnoMerch = () => E.registoMerch.filter(l => !l.fecho);
 const valida = l => l.estado === 'Válida';
+
+// Texto sem acentos e em minúsculas, para pesquisar «caldo» e encontrar «Caldo Verde»
+function semAcentos(t) {
+  return String(t).normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+}
+
+// Número de uma senha (FIN-0012 → 12)
+function numSenha(cod) {
+  const m = String(cod).match(/(\d+)\s*$/);
+  return m ? int(m[1]) : NaN;
+}
+
+// Uma linha (ou um pedido) corresponde à pesquisa?
+//  - só algarismos → nº do pedido, nº da venda ou nº de uma senha do intervalo
+//  - texto → todas as palavras têm de aparecer (produto, hora, código das senhas…)
+function corresponde(q, linhas, textoBusca) {
+  q = semAcentos(q).trim();
+  if (!q) return true;
+  if (/^\d+$/.test(q)) {
+    const n = int(q);
+    return linhas.some(l => l.pedido === n || l.venda === n || (numSenha(l.ini) <= n && n <= numSenha(l.fim)));
+  }
+  const t = semAcentos(textoBusca);
+  return q.split(/\s+/).every(p => t.includes(p));
+}
+
+// Lista com caixa de pesquisa: itens = [{ html, valor, linhas, busca }]
+const MAX_MOSTRAR = 60;
+function escolherComPesquisa(titulo, texto, itens) {
+  return new Promise(ok => {
+    $('modalTitulo').textContent = titulo;
+    $('modalInput').hidden = true;
+    $('modalCorpo').innerHTML = (texto ? `<p>${texto}</p>` : '') +
+      '<input id="pesquisaLista" class="pesquisa-lista" type="search" autocomplete="off" ' +
+      'placeholder="Procurar: produto (ex.: caldo), nº do pedido ou nº da senha">' +
+      '<div class="info-pesquisa" id="infoPesquisa"></div><div class="lista-escolha" id="listaPesquisa"></div>';
+    const desenhar = () => {
+      const q = $('pesquisaLista').value;
+      const achados = [];
+      itens.forEach((it, n) => { if (corresponde(q, it.linhas, it.busca)) achados.push(n); });
+      $('listaPesquisa').innerHTML = achados.length
+        ? achados.slice(0, MAX_MOSTRAR).map(n => `<button class="item-escolha" data-n="${n}">${itens[n].html}</button>`).join('')
+        : '<p class="nota">Nada encontrado. Experimente outra palavra.</p>';
+      $('infoPesquisa').textContent = achados.length > MAX_MOSTRAR
+        ? `${achados.length} encontrados · a mostrar os ${MAX_MOSTRAR} mais recentes — escreva mais para afinar`
+        : `${achados.length} de ${itens.length}`;
+    };
+    $('pesquisaLista').oninput = desenhar;
+    desenhar();
+    const caixa = $('modalBotoes');
+    caixa.innerHTML = '<button class="btn cinza">CANCELAR</button>';
+    const fechar = v => {
+      $('fundoModal').hidden = true;
+      document.removeEventListener('keydown', teclas);
+      $('modalCorpo').onclick = null;
+      ok(v);
+    };
+    const teclas = e => { if (e.key === 'Escape') fechar(null); };
+    caixa.firstChild.onclick = () => fechar(null);
+    $('modalCorpo').onclick = e => {
+      const b = e.target.closest('.item-escolha');
+      if (b) fechar(itens[int(b.dataset.n)].valor);
+    };
+    document.addEventListener('keydown', teclas);
+    $('fundoModal').hidden = false;
+  });
+}
 
 function pedidosDe(linhas) {
   const m = new Map();
@@ -1366,51 +1611,186 @@ function resumoPedido(n, ls) {
   return `<b>Pedido ${n}</b> · ${horaPT(new Date(ls[0].data))} · ${esc(prods)}<br><small>${ls.length} linha(s) · ${sen} senhas · ${euro(val)}</small>`;
 }
 
-/* ---------- ANULAR ---------- */
+/* ---------- ANULAR ----------
+   Um só sítio para anular: botão ANULAR VENDA do quadro em que se está (senhas ou merchandising).
+   1) pesquisa em TODAS as vendas (turno atual e turnos já fechados)
+   2) a venda aparece no quadro do pedido para confirmar
+   3) motivo obrigatório
+   4) «O cliente ficou com as senhas/artigos?» → SIM: a app regista sozinha a venda correta
+      (mesmo turno, mesma data, mesmos números, sem imprimir); NÃO: só anula
+   5) se o turno já estava fechado, o fecho é recalculado e fica marcado RETIFICADO */
+const rotuloTurno = l => l.fecho ? 'Fecho Nº ' + l.fecho : 'Turno atual';
+
 async function anularVenda() {
-  if (E.pedido.length) return aviso('Há um pedido por imprimir.\nCarregue em IMPRIMIR PEDIDO ou em LIMPAR antes de anular.');
+  if (anulando) return;
+  if (ped().length) return aviso(`Há ${MERCH() ? 'uma venda por registar' : 'um pedido por imprimir'}.\nCarregue em ${MERCH() ? 'REGISTAR VENDA' : 'IMPRIMIR PEDIDO'} ou em LIMPAR antes de anular.`);
   if (modo !== 'ADMIN' && !await pedirPalavraPasse('Anular uma venda pede a palavra-passe de administrador.')) return;
-  const vivas = linhasTurno().filter(valida);
-  if (!vivas.length) return aviso('Não há vendas válidas no turno atual para anular.\n(Depois do fecho de caixa já não se pode anular.)', 'Anular');
+  const reg = regQ(), Q = quadro;
+  const vivas = reg.filter(valida);
+  if (!vivas.length) return aviso('Não há vendas válidas para anular.', 'Anular');
 
   const tipo = await janela({
-    titulo: 'Anular', html: 'O que quer anular?',
+    titulo: 'Anular' + (Q === 'merch' ? ' · Merchandising' : ''), html: 'O que quer anular?',
     botoes: [{ texto: 'CANCELAR', classe: 'cinza', valor: null }, { texto: 'SÓ UMA LINHA', classe: 'azul', valor: 'linha' },
-      { texto: 'PEDIDO INTEIRO', classe: 'vermelho', valor: 'pedido' }]
+      { texto: (Q === 'merch' ? 'VENDA INTEIRA' : 'PEDIDO INTEIRO'), classe: 'vermelho', valor: 'pedido' }]
   });
   if (!tipo) return;
+  const dia = l => new Date(l.data).toLocaleDateString('pt-PT');
+  const numeros = l => Q === 'senhas' ? ` · ${esc(l.ini)} a ${esc(l.fim)}` : '';
 
-  let alvo, texto;
+  let alvo;
   if (tipo === 'pedido') {
-    const lista = pedidosDe(vivas).slice(0, 15);
-    const n = await escolherDaLista('Anular pedido', 'Toque no pedido a anular (os 15 mais recentes do turno):',
-      lista.map(([n, ls]) => ({ html: resumoPedido(n, ls), valor: n })));
+    const lista = pedidosDe(vivas);
+    const n = await escolherComPesquisa(Q === 'merch' ? 'Anular venda de merchandising' : 'Anular pedido',
+      'Toque no pedido a anular (todos os turnos, os mais recentes primeiro):',
+      lista.map(([n, ls]) => {
+        const sen = ls.reduce((s, l) => s + l.qtd, 0), val = r2(ls.reduce((s, l) => s + l.valor, 0));
+        const prods = Array.from(new Set(ls.map(l => l.produto.toUpperCase()))).join(', ');
+        return {
+          html: `<b>Pedido ${n}</b> · ${dia(ls[0])} ${horaPT(new Date(ls[0].data))} · ${esc(prods)}<br>` +
+            `<small>${rotuloTurno(ls[0])} · ${ls.length} linha(s) · ${sen} ${unid(sen, Q)} · ${euro(val)}</small>`,
+          valor: n, linhas: ls,
+          busca: ls.map(l => `${l.produto} ${l.ini || ''} ${l.fim || ''} ${l.formato || ''}`).join(' ') +
+            ` ${dia(ls[0])} ${horaPT(new Date(ls[0].data))} ${rotuloTurno(ls[0])}`
+        };
+      }));
     if (n === null) return;
     alvo = vivas.filter(l => l.pedido === n);
-    texto = `o <b>pedido Nº ${n}</b> (${alvo.length} linha(s))`;
   } else {
-    const lista = vivas.slice().sort((a, b) => b.venda - a.venda).slice(0, 15);
-    const v = await escolherDaLista('Anular uma linha', 'Toque na linha a anular (as 15 mais recentes do turno):',
+    const lista = vivas.slice().sort((a, b) => b.venda - a.venda);
+    const v = await escolherComPesquisa('Anular uma linha', 'Toque na linha a anular (todos os turnos, as mais recentes primeiro):',
       lista.map(l => ({
-        html: `<b>${esc(l.produto.toUpperCase())}</b> · ${fmtCurto(l.formato)} · ${l.qtd} senhas · ${euro(l.valor)}<br>` +
-          `<small>Pedido ${l.pedido} · venda ${l.venda} · ${horaPT(new Date(l.data))} · ${esc(l.ini)} a ${esc(l.fim)}</small>`,
+        linhas: [l],
+        busca: `${l.produto} ${l.ini || ''} ${l.fim || ''} ${l.formato || ''} ${dia(l)} ${horaPT(new Date(l.data))} ${rotuloTurno(l)}`,
+        html: `<b>${esc(l.produto.toUpperCase())}</b> · ${esc(l.formato)} · ${l.qtd} ${unid(l.qtd, Q)} · ${euro(l.valor)}<br>` +
+          `<small>Pedido ${l.pedido} · ${dia(l)} ${horaPT(new Date(l.data))} · ${rotuloTurno(l)}${numeros(l)}</small>`,
         valor: l.venda
       })));
     if (v === null) return;
     alvo = vivas.filter(l => l.venda === v);
-    texto = `a <b>linha ${v}</b> (${esc(alvo[0].produto.toUpperCase())}, ${alvo[0].qtd} senhas, pedido ${alvo[0].pedido})`;
   }
-  const devolver = r2(alvo.reduce((s, l) => s + l.valor, 0));
-  if (!await confirmar(`Anular ${texto}?<br><br><span class="cobrar">DEVOLVER: ${euro(devolver)}</span><br><br>` +
-    'As senhas destas linhas deixam de contar no turno.', 'Confirmar anulação', 'SIM, ANULAR', 'NÃO')) return;
+  anulando = { quadro: Q, tipo, linhas: alvo };
+  renderPedido();
+  $('cartaoPedido').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+}
 
+function cancelarAnulacao() {
+  anulando = null;
+  renderPedido();
+}
+
+// Valor correto de uma linha, pelos preços atuais (o administrador pode alterar)
+function valorCorreto(l, Q) {
+  if (l.formato === 'Oferta') return 0;
+  const lista = Q === 'merch' ? E.produtosMerch : E.produtos;
+  const p = lista[l.prodN - 1];
+  const precoAtual = p && p.nome === l.produto ? p.preco : l.preco;
+  if (Q === 'senhas' && l.formato.startsWith('Pacote ')) {
+    const k = int(l.formato.slice(7));
+    return pacValido(k) && E.pacotes[k - 1].senhas === l.qtd ? E.pacotes[k - 1].valor : l.valor;
+  }
+  return r2(l.qtd * precoAtual);
+}
+
+async function confirmarAnulacao() {
+  const A = anulando;
+  if (!A) return;
+  const Q = A.quadro, coisas = Q === 'merch' ? 'os artigos' : 'as senhas';
+  const valorOrig = r2(A.linhas.reduce((s, l) => s + l.valor, 0));
+
+  const motivo = await perguntar('Motivo da anulação (obrigatório).<br><small>Ex.: «Caldo verde a 3,50 € em vez de 1,50 €; diferença devolvida».</small>',
+    'Motivo da anulação', { max: 120, placeholder: 'O que estava mal' });
+  if (motivo === null) return;
+  if (!motivo) return aviso('Sem motivo, a venda não foi anulada.', 'Anular');
+
+  const ficou = await janela({
+    titulo: 'Anular', html: `<b>O cliente ficou com ${coisas}?</b><br><br>` +
+      `· <b>SIM</b>: só recebe a diferença; a app regista a venda certa (sem imprimir).<br>` +
+      `· <b>NÃO</b>: devolveu ${coisas} e recebe o dinheiro todo (${euro(valorOrig)}).`,
+    botoes: [{ texto: 'CANCELAR', classe: 'cinza', valor: null }, { texto: 'NÃO, DEVOLVEU', classe: 'vermelho', valor: false },
+      { texto: 'SIM, FICOU', classe: 'verde', valor: true }]
+  });
+  if (ficou === null) return;
+
+  // valores corretos (só se o cliente ficou com as senhas / artigos)
+  let novos = null;
+  if (ficou) {
+    for (;;) {
+      let h = `<p>Valor correto de cada linha (já preenchido com os preços atuais; pode alterar):</p><table class="tabela-corrigir">` +
+        '<tr><th>Produto</th><th class="num">Qtd</th><th class="num">Cobrado</th><th class="num">Correto (€)</th></tr>';
+      A.linhas.forEach((l, n) => {
+        h += `<tr><td>${esc(l.produto)} <small>${esc(l.formato)}</small></td><td class="num">${l.qtd}</td><td class="num">${euro(l.valor)}</td>` +
+          `<td class="num"><input id="corr${n}" type="number" min="0" step="0.01" inputmode="decimal" value="${novos ? novos[n] : valorCorreto(l, Q)}"${l.formato === 'Oferta' ? ' disabled' : ''}></td></tr>`;
+      });
+      h += `</table><div class="cobrar" id="corrDif"></div>`;
+      const pr = janela({ titulo: 'Venda correta', html: h,
+        botoes: [{ texto: 'CANCELAR', classe: 'cinza', valor: false }, { texto: 'CONTINUAR', classe: 'verde', valor: true }] });
+      const lerNovos = () => A.linhas.map((l, n) => r2(num($('corr' + n).value)));
+      const atualizar = () => {
+        const d = r2(valorOrig - lerNovos().reduce((s, v) => s + v, 0));
+        $('corrDif').textContent = d >= 0 ? 'DEVOLVER: ' + euro(d) : 'A RECEBER: ' + euro(-d);
+      };
+      A.linhas.forEach((l, n) => { $('corr' + n).oninput = atualizar; });
+      atualizar();
+      const ok = await pr;
+      if (!ok) return;
+      novos = lerNovos();
+      if (novos.some(v => v < 0 || !isFinite(v))) { await aviso('Os valores não podem ser negativos.'); continue; }
+      break;
+    }
+  }
+  const valorNovo = novos ? r2(novos.reduce((s, v) => s + v, 0)) : 0;
+  const dif = r2(valorOrig - valorNovo);
+  const fechos = Array.from(new Set(A.linhas.map(l => l.fecho).filter(Boolean)));
+
+  let h = `<table class="resumo"><tr><td>Anular (valor cobrado)</td><td class="num">${euro(valorOrig)}</td></tr>`;
+  if (ficou) h += `<tr><td>Registar venda correta (sem imprimir)</td><td class="num">${euro(valorNovo)}</td></tr>`;
+  h += `</table><p>Motivo: <i>${esc(motivo)}</i></p>` +
+    `<div class="cobrar">${dif >= 0 ? 'DEVOLVER AO CLIENTE: ' + euro(dif) : 'A RECEBER DO CLIENTE: ' + euro(-dif)}</div>` +
+    (fechos.length ? `<p>O turno desta venda já está fechado: o <b>fecho de caixa Nº ${fechos.join(', ')}</b> vai ser recalculado e fica marcado como <b>RETIFICADO</b>.</p>` : '') +
+    (!ficou ? `<p>Recolha ${coisas}.</p>` : '');
+  if (!await confirmar(h, 'Confirmar anulação', 'SIM, ANULAR', 'NÃO')) return;
+
+  // aplicar
   const agora = new Date().toISOString();
-  for (const l of alvo) { l.estado = 'Anulada'; l.anuladaEm = agora; }
-  E.ultimoPedido = `${tipo === 'pedido' ? 'Pedido Nº ' + alvo[0].pedido : 'Linha ' + alvo[0].venda} ANULADO às ${horaPT(new Date())} · devolver ${euro(devolver)}`;
+  const reg = Q === 'merch' ? E.registoMerch : E.registo;
+  for (const l of A.linhas) { l.estado = 'Anulada'; l.anuladaEm = agora; l.motivoAnulacao = motivo; }
+  const vendasNovas = [];
+  if (ficou) {
+    let nVenda = reg.reduce((m, l) => Math.max(m, l.venda), 0);
+    A.linhas.forEach((l, n) => {
+      const valor = novos[n];
+      let desconto = 0;
+      if (Q === 'senhas' && l.formato.startsWith('Pacote ')) {
+        const p = E.produtos[l.prodN - 1];
+        const precoNormal = p && p.nome === l.produto ? p.preco : l.preco;
+        desconto = Math.max(0, r2(l.qtd * precoNormal - valor));
+      }
+      const c = { ...l, venda: ++nVenda, valor, preco: l.qtd ? r2(valor / l.qtd) : 0, desconto,
+        estado: 'Válida', anuladaEm: null, motivoAnulacao: '', reimpressoes: 0, reimpressoEm: null,
+        correcaoDe: l.venda, corrigidaEm: agora, motivo: `Correção da venda ${l.venda}` };
+      reg.push(c);
+      vendasNovas.push(c.venda);
+      l.corrigidaPor = c.venda;
+    });
+  }
+  for (const num of fechos) {
+    const ls = A.linhas.filter(l => l.fecho === num);
+    const vo = r2(ls.reduce((s, l) => s + l.valor, 0));
+    const vn = ficou ? r2(A.linhas.reduce((s, l, n) => s + (l.fecho === num ? novos[n] : 0), 0)) : 0;
+    retificarFecho(num, { data: agora, quadro: Q, pedido: ls[0].pedido, vendas: ls.map(l => l.venda).join(', '),
+      produtos: Array.from(new Set(ls.map(l => l.produto))).join(', '), motivo, valorAnulado: vo, valorCorrigido: vn, diferenca: r2(vo - vn) });
+  }
+  const msg = `${A.tipo === 'pedido' ? 'Pedido Nº ' + A.linhas[0].pedido : 'Linha ' + A.linhas[0].venda} ANULADO às ${horaPT(new Date())}` +
+    (ficou ? ' · corrigido' : '') + ` · ${dif >= 0 ? 'devolver ' + euro(dif) : 'receber ' + euro(-dif)}`;
+  if (Q === 'merch') E.ultimoMerch = msg; else E.ultimoPedido = msg;
+  anulando = null;
   await guardar();
   renderVenda();
   renderTopo();
-  aviso(`Anulação feita.\nDevolver ao cliente: ${euro(devolver)}\nRecolha as senhas.`, 'Anular');
+  aviso(`Anulação feita.\n${dif >= 0 ? 'Devolver ao cliente: ' + euro(dif) : 'Receber do cliente: ' + euro(-dif)}` +
+    (ficou ? `\nVenda correta registada (sem imprimir): ${euro(valorNovo)}` : `\nRecolha ${coisas}.`) +
+    (fechos.length ? `\nFecho Nº ${fechos.join(', ')} retificado.` : ''), 'Anular');
 }
 
 /* ---------- REIMPRIMIR (pedido inteiro, mesmos números) ---------- */
@@ -1445,7 +1825,7 @@ function calcularTotais(linhas) {
   for (const l of linhas) {
     if (!t.vendaIni || l.venda < t.vendaIni) t.vendaIni = l.venda;
     if (l.venda > t.vendaFim) t.vendaFim = l.venda;
-    const k = l.produto + '|' + l.formato;
+    const k = l.produto + '|' + l.formato + '|' + r2(l.preco);   // preços diferentes (ex.: correções) ficam em linhas separadas
     if (!det.has(k)) det.set(k, { produto: l.produto, prodN: l.prodN, formato: l.formato, preco: l.preco, senhas: 0, valor: 0, desconto: 0, anuladas: 0, valorAnulado: 0 });
     const d = det.get(k);
     if (valida(l)) {
@@ -1464,7 +1844,7 @@ function calcularTotais(linhas) {
       t.anuladas += 1; t.valorAnulado += l.valor;
     }
   }
-  const detalhe = Array.from(det.values()).sort((a, b) => (a.prodN - b.prodN) || (ordemFmt(a.formato) - ordemFmt(b.formato)));
+  const detalhe = Array.from(det.values()).sort((a, b) => (a.prodN - b.prodN) || (ordemFmt(a.formato) - ordemFmt(b.formato)) || (b.preco - a.preco));
   // horas seguidas do primeiro ao último bloco (com zeros)
   const horas = [];
   if (t.porHora.size) {
@@ -1511,15 +1891,18 @@ function graficoBarras(horas, chave, titulo, fmt, cor) {
 /* ---------- ECRÃ TURNO ---------- */
 function renderTurno() {
   const t = calcularTotais(linhasTurno());
+  const m = calcularTotais(linhasTurnoMerch());
   const cartao = (rot, val, cls = '') => `<div class="kpi ${cls}"><div class="kpi-rot">${rot}</div><div class="kpi-val">${val}</div></div>`;
   let h = '<div class="kpis">' +
-    cartao('Valor em caixa', euro(t.valor), 'destaque') +
+    cartao('Valor em caixa (total)', euro(t.valor + m.valor), 'destaque') +
+    cartao('Senhas (€)', euro(t.valor)) + cartao('Merchandising (€)', euro(m.valor)) + '</div>';
+  h += '<h3 class="sec-turno">SENHAS</h3><div class="kpis">' +
     cartao('Senhas', t.senhas) + cartao('Pedidos', t.pedidos) +
     cartao('Pacote 1', euro(t.p1)) + cartao('Pacote 2', euro(t.p2)) + cartao('Avulso / normal', euro(t.avulso)) +
     cartao('Ofertas', t.ofertas + (t.ofertas === 1 ? ' senha' : ' senhas')) + cartao('Desconto', euro(t.desconto)) +
     cartao('Anuladas', `${t.anuladas} · ${euro(t.valorAnulado)}`) + '</div>';
 
-  h += '<div class="turno-grelha"><div class="cartao"><h2>Turno atual por produto <small>(desde o último fecho)</small></h2>';
+  h += '<div class="turno-grelha"><div class="cartao"><h2>Senhas por produto <small>(turno atual, desde o último fecho)</small></h2>';
   if (!t.detalhe.length) h += '<p class="nota">Ainda não há vendas neste turno.</p>';
   else {
     h += '<table class="tabela tab-turno"><thead><tr><th>Produto</th><th>Tipo</th><th>Senhas</th><th>Valor</th><th>Desconto</th><th>Anuladas</th></tr></thead><tbody>';
@@ -1532,13 +1915,28 @@ function renderTurno() {
     graficoBarras(t.horas, 'valor', 'Euros por hora', v => euroCurto(v), '#2980b9') +
     graficoBarras(t.horas, 'senhas', 'Senhas por hora', v => String(Math.round(v)), '#e67e22') + '</div></div>';
 
+  // merchandising do turno
+  h += '<h3 class="sec-turno merch">MERCHANDISING</h3><div class="kpis">' +
+    cartao('Valor', euro(m.valor), 'destaque') + cartao('Unidades', m.senhas) + cartao('Vendas', m.pedidos) +
+    cartao('Ofertas', m.ofertas + (m.ofertas === 1 ? ' unidade' : ' unidades')) +
+    cartao('Anuladas', `${m.anuladas} · ${euro(m.valorAnulado)}`) + '</div>';
+  h += '<div class="turno-grelha"><div class="cartao"><h2>Merchandising por artigo <small>(turno atual)</small></h2>';
+  if (!m.detalhe.length) h += '<p class="nota">Ainda não há vendas de merchandising neste turno.</p>';
+  else {
+    h += '<table class="tabela tab-turno"><thead><tr><th>Artigo</th><th>Tipo</th><th>Unidades</th><th>Valor</th><th>Anuladas</th></tr></thead><tbody>';
+    for (const d of m.detalhe) h += `<tr><td class="esq">${esc(d.produto)}</td><td>${esc(d.formato)}</td><td>${d.senhas}</td><td>${euro(d.valor)}</td><td>${d.anuladas ? d.anuladas + ' · ' + euro(d.valorAnulado) : ''}</td></tr>`;
+    h += `<tr class="total"><td class="esq">Total</td><td></td><td>${m.senhas}</td><td>${euro(m.valor)}</td><td>${m.anuladas ? m.anuladas + ' · ' + euro(m.valorAnulado) : ''}</td></tr></tbody></table>`;
+  }
+  h += '</div><div class="cartao"><h2>Merchandising por hora</h2>' +
+    graficoBarras(m.horas, 'valor', 'Euros por hora', v => euroCurto(v), '#6c3483') + '</div></div>';
+
   // fechos deste evento
   h += '<div class="cartao"><h2>Fechos de caixa deste evento</h2>';
   if (!E.fechos.length) h += '<p class="nota">Ainda não foi feito nenhum fecho.</p>';
   else {
-    h += '<table class="tabela tab-turno"><thead><tr><th>Nº</th><th>Data/hora</th><th>Senhas</th><th>Pacote 1</th><th>Pacote 2</th><th>Avulso</th><th>Ofertas</th><th>Em caixa</th><th></th></tr></thead><tbody>';
+    h += '<table class="tabela tab-turno"><thead><tr><th>Nº</th><th>Data/hora</th><th>Senhas</th><th>Pacote 1</th><th>Pacote 2</th><th>Avulso</th><th>Ofertas</th><th>Senhas (€)</th><th>Merch (€)</th><th>Em caixa</th><th></th></tr></thead><tbody>';
     for (const f of E.fechos.slice().reverse()) {
-      h += `<tr><td>${f.num}</td><td>${dataHoraPT(f.data)}</td><td>${f.senhas}</td><td>${euro(f.p1)}</td><td>${euro(f.p2)}</td><td>${euro(f.avulso)}</td><td>${f.ofertas}</td><td><b>${euro(f.valor)}</b></td>` +
+      h += `<tr><td>${f.num}${f.retificacoes ? '<span class="selo-retificado">RETIFICADO</span>' : ''}</td><td>${dataHoraPT(f.data)}</td><td>${f.senhas}</td><td>${euro(f.p1)}</td><td>${euro(f.p2)}</td><td>${euro(f.avulso)}</td><td>${f.ofertas}</td><td>${euro(f.valor)}</td><td>${euro(f.mValor || 0)}</td><td><b>${euro(totalFecho(f))}</b></td>` +
         `<td><button class="btn cinza-escuro pequeno" data-acao="reimprimirTalao" data-n="${f.num}">TALÃO</button></td></tr>`;
     }
     h += '</tbody></table>';
@@ -1547,46 +1945,93 @@ function renderTurno() {
   $('turnoConteudo').innerHTML = h;
 }
 
-/* ---------- FECHO DE CAIXA ---------- */
-async function fecharCaixa() {
-  if (E.pedido.length) return aviso('Há um pedido por imprimir.\nCarregue em IMPRIMIR PEDIDO ou em LIMPAR antes de fazer o fecho.', 'Fecho de caixa');
-  const linhas = linhasTurno();
-  if (!linhas.length) return aviso('Não há vendas no turno atual para fechar.', 'Fecho de caixa');
-  const t = calcularTotais(linhas);
+/* ---------- FECHO DE CAIXA (senhas + merchandising, em partes separadas) ---------- */
+const totalFecho = f => r2((f.valor || 0) + (f.mValor || 0));
 
-  let h = `<p>Vendas Nº ${t.vendaIni} a ${t.vendaFim} · ${t.pedidos} pedido(s)</p><table class="resumo">`;
-  for (const d of t.detalhe) if (d.senhas > 0)
-    h += `<tr><td><b>${esc(d.produto.toUpperCase())}</b> · ${esc(d.formato)}</td><td class="num">${d.senhas}</td><td class="num">${euro(d.valor)}</td></tr>`;
-  h += `</table><table class="resumo apurado">
-    <tr><td>Pacote 1</td><td class="num">${euro(t.p1)}</td></tr>
-    <tr><td>Pacote 2</td><td class="num">${euro(t.p2)}</td></tr>
-    <tr><td>Avulso / normal</td><td class="num">${euro(t.avulso)}</td></tr>
-    <tr><td>Ofertas</td><td class="num">${t.ofertas} senha(s)</td></tr>
-    <tr><td>Desconto concedido</td><td class="num">${euro(t.desconto)}</td></tr>
-    <tr><td>Anuladas</td><td class="num">${t.anuladas} · ${euro(t.valorAnulado)}</td></tr></table>
-    <div class="cobrar">VALOR EM CAIXA: ${euro(t.valor)}</div>
-    <p>Conte o dinheiro: deve bater com o valor em caixa.<br>Depois do fecho, as vendas deste turno já não podem ser anuladas.</p>`;
+// Campos de um fecho a partir dos totais das senhas (t) e do merchandising (m)
+function camposFecho(t, m) {
+  return {
+    senhas: t.senhas, valor: t.valor, desconto: t.desconto, semDesconto: t.semDesconto,
+    p1: t.p1, p2: t.p2, avulso: t.avulso, ofertas: t.ofertas,
+    anuladas: t.anuladas, valorAnulado: t.valorAnulado, horas: t.horas,
+    mPedidos: m.pedidos, mUnidades: m.senhas, mValor: m.valor, mOfertas: m.ofertas,
+    mAnuladas: m.anuladas, mValorAnulado: m.valorAnulado, mHoras: m.horas,
+    total: r2(t.valor + m.valor)
+  };
+}
+
+function detalheFecho(num, data, t, m) {
+  return [...t.detalhe.map(d => ({ fecho: num, data, quadro: 'senhas', ...d })),
+    ...m.detalhe.map(d => ({ fecho: num, data, quadro: 'merch', ...d }))];
+}
+
+async function fecharCaixa() {
+  if (anulando) return aviso('Está a meio de uma anulação. Termine-a ou carregue em CANCELAR.', 'Fecho de caixa');
+  if (E.pedido.length) return aviso('Há um pedido de senhas por imprimir.\nCarregue em IMPRIMIR PEDIDO ou em LIMPAR antes de fazer o fecho.', 'Fecho de caixa');
+  if (E.pedidoMerch.length) return aviso('Há uma venda de merchandising por registar.\nCarregue em REGISTAR VENDA ou em LIMPAR antes de fazer o fecho.', 'Fecho de caixa');
+  const linhas = linhasTurno(), linhasM = linhasTurnoMerch();
+  if (!linhas.length && !linhasM.length) return aviso('Não há vendas no turno atual para fechar.', 'Fecho de caixa');
+  const t = calcularTotais(linhas), m = calcularTotais(linhasM);
+
+  let h = '<h4 class="sec-fecho">SENHAS</h4>';
+  if (!linhas.length) h += '<p class="nota">Sem vendas de senhas.</p>';
+  else {
+    h += `<p>Vendas Nº ${t.vendaIni} a ${t.vendaFim} · ${t.pedidos} pedido(s)</p><table class="resumo">`;
+    for (const d of t.detalhe) if (d.senhas > 0)
+      h += `<tr><td><b>${esc(d.produto.toUpperCase())}</b> · ${esc(d.formato)}</td><td class="num">${d.senhas}</td><td class="num">${euro(d.valor)}</td></tr>`;
+    h += `</table><table class="resumo apurado">
+      <tr><td>Pacote 1</td><td class="num">${euro(t.p1)}</td></tr>
+      <tr><td>Pacote 2</td><td class="num">${euro(t.p2)}</td></tr>
+      <tr><td>Avulso / normal</td><td class="num">${euro(t.avulso)}</td></tr>
+      <tr><td>Ofertas</td><td class="num">${t.ofertas} senha(s)</td></tr>
+      <tr><td>Desconto concedido</td><td class="num">${euro(t.desconto)}</td></tr>
+      <tr><td>Anuladas</td><td class="num">${t.anuladas} · ${euro(t.valorAnulado)}</td></tr>
+      <tr><td><b>Total senhas</b></td><td class="num"><b>${euro(t.valor)}</b></td></tr></table>`;
+  }
+  h += '<h4 class="sec-fecho merch">MERCHANDISING</h4>';
+  if (!linhasM.length) h += '<p class="nota">Sem vendas de merchandising.</p>';
+  else {
+    h += `<p>${m.pedidos} venda(s)</p><table class="resumo">`;
+    for (const d of m.detalhe) if (d.senhas > 0)
+      h += `<tr><td><b>${esc(d.produto.toUpperCase())}</b>${d.formato === 'Oferta' ? ' · Oferta' : ''}</td><td class="num">${d.senhas}</td><td class="num">${euro(d.valor)}</td></tr>`;
+    h += `</table><table class="resumo apurado">
+      <tr><td>Ofertas</td><td class="num">${m.ofertas} unid.</td></tr>
+      <tr><td>Anuladas</td><td class="num">${m.anuladas} · ${euro(m.valorAnulado)}</td></tr>
+      <tr><td><b>Total merchandising</b></td><td class="num"><b>${euro(m.valor)}</b></td></tr></table>`;
+  }
+  h += `<div class="cobrar">VALOR EM CAIXA: ${euro(t.valor + m.valor)}</div>
+    <p>Conte o dinheiro: deve bater com o valor em caixa.<br>Depois do fecho, uma venda deste turno ainda pode ser anulada em ANULAR VENDA (com motivo); o fecho fica marcado como retificado.</p>`;
   if (!await janela({ titulo: 'Fecho de caixa', html: h, botoes: [{ texto: 'NÃO', classe: 'cinza', valor: false }, { texto: 'FAZER O FECHO', classe: 'verde', valor: true }] })) return;
 
-  const num = E.fechos.reduce((m, f) => Math.max(m, f.num), 0) + 1;
+  const num = E.fechos.reduce((mx, f) => Math.max(mx, f.num), 0) + 1;
   const agora = new Date().toISOString();
-  const f = {
-    num, data: agora, evento: E.config.evento, posto: E.config.posto,
-    vendaIni: t.vendaIni, vendaFim: t.vendaFim, pedidos: t.pedidos, senhas: t.senhas,
-    valor: t.valor, desconto: t.desconto, semDesconto: t.semDesconto,
-    p1: t.p1, p2: t.p2, avulso: t.avulso, ofertas: t.ofertas,
-    anuladas: t.anuladas, valorAnulado: t.valorAnulado, horas: t.horas
-  };
+  const f = { num, data: agora, evento: E.config.evento, posto: E.config.posto,
+    vendaIni: t.vendaIni, vendaFim: t.vendaFim, pedidos: t.pedidos, ...camposFecho(t, m) };
   E.fechos.push(f);
-  for (const d of t.detalhe) E.fechosDetalhe.push({ fecho: num, data: agora, ...d });
+  E.fechosDetalhe.push(...detalheFecho(num, agora, t, m));
   for (const l of linhas) l.fecho = num;
-  E.ultimoPedido = `Fecho Nº ${num} feito às ${horaPT(new Date())} · em caixa: ${euro(t.valor)}`;
+  for (const l of linhasM) l.fecho = num;
+  E.ultimoPedido = `Fecho Nº ${num} feito às ${horaPT(new Date())} · em caixa: ${euro(f.total)}`;
+  E.ultimoMerch = E.ultimoPedido;
   await guardar();
   renderVenda();
   renderTopo();
   if (ecra === 'turno') renderTurno();
 
   if (await confirmar(`Fecho Nº ${num} gravado.<br><br>Imprimir o talão do fecho?`, 'Fecho de caixa')) await imprimirTalao(num);
+}
+
+// Anulação de uma venda de um turno já fechado: recalcular o fecho e guardar o que mudou
+function retificarFecho(num, ret) {
+  const f = E.fechos.find(x => x.num === num);
+  if (!f) return;
+  if (!f.original) f.original = { valor: f.valor || 0, mValor: f.mValor || 0, total: totalFecho(f), senhas: f.senhas || 0, mUnidades: f.mUnidades || 0 };
+  const t = calcularTotais(E.registo.filter(l => l.fecho === num));
+  const m = calcularTotais(E.registoMerch.filter(l => l.fecho === num));
+  Object.assign(f, camposFecho(t, m));
+  E.fechosDetalhe = E.fechosDetalhe.filter(d => d.fecho !== num).concat(detalheFecho(num, f.data, t, m));
+  f.retificacoes = (f.retificacoes || []).concat([ret]);
+  f.retificadoEm = ret.data;
 }
 
 /* ---------- TALÃO DO FECHO (imagem a preto e branco) ---------- */
@@ -1596,9 +2041,10 @@ function linhasTalao(f) {
   L.push({ t: 'centro', a: f.evento, b: true });
   L.push({ t: 'centro', a: dataHoraPT(f.data) + (f.posto ? ' · ' + f.posto : '') });
   L.push({ t: 'centro', a: `Vendas Nº ${f.vendaIni} a ${f.vendaFim} · ${f.pedidos} pedido(s)` });
+  if (f.retificacoes) L.push({ t: 'centro', a: '*** RETIFICADO ***', b: true });
   L.push({ t: 'sep' });
-  L.push({ t: 'sub', a: 'PRODUTOS' });
-  const det = E.fechosDetalhe.filter(d => d.fecho === f.num && d.senhas > 0);
+  L.push({ t: 'sub', a: 'SENHAS' });
+  const det = E.fechosDetalhe.filter(d => d.fecho === f.num && d.senhas > 0 && (d.quadro || 'senhas') === 'senhas');
   let ant = null;
   for (const d of det) {
     if (d.produto !== ant) { L.push({ t: 'linha', a: d.produto.toUpperCase(), b: true }); ant = d.produto; }
@@ -1612,14 +2058,34 @@ function linhasTalao(f) {
   L.push({ t: 'linha', a: 'Pacote 2', d: euro(f.p2) });
   L.push({ t: 'linha', a: 'Avulso / normal', d: euro(f.avulso) });
   L.push({ t: 'linha', a: 'Ofertas (senhas)', d: String(f.ofertas) });
-  L.push({ t: 'sep' });
-  L.push({ t: 'sub', a: 'TOTAL' });
   L.push({ t: 'linha', a: 'Senhas', d: String(f.senhas) });
   L.push({ t: 'linha', a: 'Desconto concedido', d: euro(f.desconto) });
   L.push({ t: 'linha', a: 'Vendas anuladas', d: String(f.anuladas) });
   L.push({ t: 'linha', a: 'Valor anulado', d: euro(f.valorAnulado) });
+  L.push({ t: 'linha', a: 'TOTAL SENHAS', d: euro(f.valor), b: true });
+
+  const detM = E.fechosDetalhe.filter(d => d.fecho === f.num && d.senhas > 0 && d.quadro === 'merch');
+  if (detM.length || f.mAnuladas) {
+    L.push({ t: 'sep' });
+    L.push({ t: 'sub', a: 'MERCHANDISING' });
+    for (const d of detM) L.push({ t: 'linha', a: `${d.produto.toUpperCase()}${d.formato === 'Oferta' ? ' (oferta)' : ''}: ${d.senhas}`, d: euro(d.valor), p: true });
+    L.push({ t: 'linha', a: 'Ofertas (unidades)', d: String(f.mOfertas || 0) });
+    L.push({ t: 'linha', a: 'Vendas anuladas', d: String(f.mAnuladas || 0) });
+    L.push({ t: 'linha', a: 'Valor anulado', d: euro(f.mValorAnulado || 0) });
+    L.push({ t: 'linha', a: 'TOTAL MERCHANDISING', d: euro(f.mValor || 0), b: true });
+  }
+  if (f.retificacoes) {
+    L.push({ t: 'sep' });
+    L.push({ t: 'sub', a: 'RETIFICAÇÕES' });
+    for (const r of f.retificacoes) {
+      L.push({ t: 'linha', a: `${dataHoraPT(r.data)} · ${r.quadro === 'merch' ? 'Merch' : 'Senhas'} · pedido ${r.pedido}`, p: true });
+      L.push({ t: 'linha', a: `  ${r.produtos}`, d: '-' + euro(r.diferenca), p: true });
+      L.push({ t: 'linha', a: `  ${r.motivo.length > 40 ? r.motivo.slice(0, 39) + '…' : r.motivo}`, p: true });
+    }
+    L.push({ t: 'linha', a: 'Valor original', d: euro(f.original.total) });
+  }
   L.push({ t: 'sep' });
-  L.push({ t: 'grande', a: 'VALOR EM CAIXA', d: euro(f.valor) });
+  L.push({ t: 'grande', a: 'VALOR EM CAIXA', d: euro(totalFecho(f)) });
   return L;
 }
 
@@ -1733,8 +2199,11 @@ let histAba = 'registo', histFecho = null;
 
 function renderHistorico() {
   $('histAbaRegisto').classList.toggle('ativo', histAba === 'registo');
+  $('histAbaMerch').classList.toggle('ativo', histAba === 'merch');
   $('histAbaFechos').classList.toggle('ativo', histAba === 'fechos');
-  if (histAba === 'registo') renderHistRegisto(); else renderHistFechos();
+  if (histAba === 'registo') renderHistRegisto();
+  else if (histAba === 'merch') renderHistMerch();
+  else renderHistFechos();
 }
 
 function opcoes(lista, atual) {
@@ -1763,12 +2232,12 @@ function renderHistRegisto() {
   h += `<p class="hist-resumo">${ls.length} linha(s) · válidas: <b>${sen} senhas · ${euro(val)}</b>${ls.length > 400 ? ' · a mostrar as 400 mais recentes' : ''}</p>`;
   if (!ls.length) h += '<p class="nota">Sem linhas com estes filtros.</p>';
   else {
-    h += '<div class="tabela-rolar"><table class="tabela tab-hist"><thead><tr><th>Nº</th><th>Data/hora</th><th>Produto</th><th>Tipo</th><th>Senhas</th><th>Números</th><th>Preço</th><th>Valor</th><th>Desconto</th><th>Estado</th><th>Fecho</th><th>Pedido</th><th>Motivo</th><th>Reimpr.</th></tr></thead><tbody>';
+    h += '<div class="tabela-rolar"><table class="tabela tab-hist"><thead><tr><th>Nº</th><th>Data/hora</th><th>Produto</th><th>Tipo</th><th>Senhas</th><th>Números</th><th>Preço</th><th>Valor</th><th>Desconto</th><th>Estado</th><th>Fecho</th><th>Pedido</th><th>Motivo</th><th>Motivo da anulação</th><th>Reimpr.</th></tr></thead><tbody>';
     for (const l of ls.slice(0, 400)) {
       const pu = l.preco.toLocaleString('pt-PT', { minimumFractionDigits: 2, maximumFractionDigits: 4 });
       h += `<tr class="${l.estado === 'Anulada' ? 'anulada' : ''}"><td>${l.venda}</td><td>${dataHoraPT(l.data)}</td><td class="esq">${esc(l.produto)}</td><td>${esc(l.formato)}</td><td>${l.qtd}</td>` +
         `<td>${esc(l.ini)} a ${esc(l.fim)}</td><td>${pu}</td><td>${euro(l.valor)}</td><td>${euro(l.desconto)}</td><td>${esc(l.estado)}</td>` +
-        `<td>${l.fecho || ''}</td><td>${l.pedido}</td><td class="esq">${esc(l.motivo || '')}</td><td>${l.reimpressoes || ''}</td></tr>`;
+        `<td>${l.fecho || ''}</td><td>${l.pedido}</td><td class="esq">${esc(l.motivo || '')}</td><td class="esq">${esc(l.motivoAnulacao || '')}${l.corrigidaPor ? ' <small>(corrigida pela ' + l.corrigidaPor + ')</small>' : ''}</td><td>${l.reimpressoes || ''}</td></tr>`;
     }
     h += '</tbody></table></div>';
   }
@@ -1778,23 +2247,72 @@ function renderHistRegisto() {
   });
 }
 
+const filtroM = { produto: '', estado: '', fecho: '' };
+function renderHistMerch() {
+  const prods = Array.from(new Set(E.registoMerch.map(l => l.produto)));
+  const fechos = E.fechos.map(f => [String(f.num), 'Fecho Nº ' + f.num]);
+  let h = `<div class="filtros">
+    <label>Artigo <select data-filtro="produto">${opcoes([['', 'Todos'], ...prods.map(p => [p, p])], filtroM.produto)}</select></label>
+    <label>Estado <select data-filtro="estado">${opcoes([['', 'Todos'], ['Válida', 'Válida'], ['Anulada', 'Anulada']], filtroM.estado)}</select></label>
+    <label>Fecho <select data-filtro="fecho">${opcoes([['', 'Todos'], ['turno', 'Turno atual (sem fecho)'], ...fechos], filtroM.fecho)}</select></label>
+  </div>`;
+  const ls = E.registoMerch.filter(l =>
+    (!filtroM.produto || l.produto === filtroM.produto) &&
+    (!filtroM.estado || l.estado === filtroM.estado) &&
+    (!filtroM.fecho || (filtroM.fecho === 'turno' ? !l.fecho : String(l.fecho) === filtroM.fecho))
+  ).sort((a, b) => b.venda - a.venda);
+  const un = ls.filter(valida).reduce((s, l) => s + l.qtd, 0);
+  const val = r2(ls.filter(valida).reduce((s, l) => s + l.valor, 0));
+  h += `<p class="hist-resumo">${ls.length} linha(s) · válidas: <b>${un} unidades · ${euro(val)}</b>${ls.length > 400 ? ' · a mostrar as 400 mais recentes' : ''}</p>`;
+  if (!ls.length) h += '<p class="nota">Sem vendas de merchandising com estes filtros.</p>';
+  else {
+    h += '<div class="tabela-rolar"><table class="tabela tab-hist"><thead><tr><th>Nº</th><th>Data/hora</th><th>Artigo</th><th>Tipo</th><th>Unid.</th><th>Preço</th><th>Valor</th><th>Estado</th><th>Fecho</th><th>Venda</th><th>Motivo</th><th>Motivo da anulação</th></tr></thead><tbody>';
+    for (const l of ls.slice(0, 400)) {
+      h += `<tr class="${l.estado === 'Anulada' ? 'anulada' : ''}"><td>${l.venda}</td><td>${dataHoraPT(l.data)}</td><td class="esq">${esc(l.produto)}</td><td>${esc(l.formato)}</td><td>${l.qtd}</td>` +
+        `<td>${euro(l.preco)}</td><td>${euro(l.valor)}</td><td>${esc(l.estado)}</td><td>${l.fecho || ''}</td><td>${l.pedido}</td>` +
+        `<td class="esq">${esc(l.motivo || '')}</td><td class="esq">${esc(l.motivoAnulacao || '')}${l.corrigidaPor ? ' <small>(corrigida pela ' + l.corrigidaPor + ')</small>' : ''}</td></tr>`;
+    }
+    h += '</tbody></table></div>';
+  }
+  $('histConteudo').innerHTML = h;
+  $('histConteudo').querySelectorAll('[data-filtro]').forEach(sel => {
+    sel.onchange = () => { filtroM[sel.dataset.filtro] = sel.value; renderHistMerch(); };
+  });
+}
+
 function renderHistFechos() {
   let h = '';
   if (!E.fechos.length) { $('histConteudo').innerHTML = '<p class="nota">Ainda não há fechos de caixa neste evento.</p>'; return; }
   if (histFecho === null || !E.fechos.find(f => f.num === histFecho)) histFecho = E.fechos[E.fechos.length - 1].num;
-  h += '<div class="tabela-rolar"><table class="tabela tab-hist"><thead><tr><th>Nº</th><th>Data/hora</th><th>Vendas</th><th>Pedidos</th><th>Senhas</th><th>Pacote 1</th><th>Pacote 2</th><th>Avulso</th><th>Ofertas</th><th>Desconto</th><th>Anuladas</th><th>Em caixa</th></tr></thead><tbody>';
+  h += '<div class="tabela-rolar"><table class="tabela tab-hist"><thead><tr><th>Nº</th><th>Data/hora</th><th>Vendas</th><th>Pedidos</th><th>Senhas</th><th>Pacote 1</th><th>Pacote 2</th><th>Avulso</th><th>Ofertas</th><th>Desconto</th><th>Anuladas</th><th>Senhas (€)</th><th>Merch (€)</th><th>Em caixa</th></tr></thead><tbody>';
   for (const f of E.fechos.slice().reverse()) {
-    h += `<tr class="clicavel${f.num === histFecho ? ' escolhido' : ''}" data-fecho="${f.num}"><td>${f.num}</td><td>${dataHoraPT(f.data)}</td><td>${f.vendaIni}–${f.vendaFim}</td><td>${f.pedidos}</td><td>${f.senhas}</td>` +
-      `<td>${euro(f.p1)}</td><td>${euro(f.p2)}</td><td>${euro(f.avulso)}</td><td>${f.ofertas}</td><td>${euro(f.desconto)}</td><td>${f.anuladas} · ${euro(f.valorAnulado)}</td><td><b>${euro(f.valor)}</b></td></tr>`;
+    h += `<tr class="clicavel${f.num === histFecho ? ' escolhido' : ''}" data-fecho="${f.num}"><td>${f.num}${f.retificacoes ? '<span class="selo-retificado">RETIFICADO</span>' : ''}</td><td>${dataHoraPT(f.data)}</td><td>${f.vendaIni}–${f.vendaFim}</td><td>${f.pedidos}</td><td>${f.senhas}</td>` +
+      `<td>${euro(f.p1)}</td><td>${euro(f.p2)}</td><td>${euro(f.avulso)}</td><td>${f.ofertas}</td><td>${euro(f.desconto)}</td><td>${f.anuladas} · ${euro(f.valorAnulado)}</td><td>${euro(f.valor)}</td><td>${euro(f.mValor || 0)}</td><td><b>${euro(totalFecho(f))}</b></td></tr>`;
   }
   h += '</tbody></table></div><p class="nota">Toque num fecho para ver o detalhe e os gráficos.</p>';
 
   const f = E.fechos.find(x => x.num === histFecho);
-  const det = E.fechosDetalhe.filter(d => d.fecho === f.num);
-  h += `<div class="turno-grelha"><div class="cartao"><h2>Fecho Nº ${f.num} <small>${dataHoraPT(f.data)}${f.posto ? ' · ' + esc(f.posto) : ''}</small></h2>`;
-  h += '<table class="tabela tab-turno"><thead><tr><th>Produto</th><th>Tipo</th><th>Senhas</th><th>Valor</th><th>Desconto</th><th>Anuladas</th></tr></thead><tbody>';
+  const det = E.fechosDetalhe.filter(d => d.fecho === f.num && (d.quadro || 'senhas') === 'senhas');
+  const detM = E.fechosDetalhe.filter(d => d.fecho === f.num && d.quadro === 'merch');
+  h += `<div class="turno-grelha"><div class="cartao"><h2>Fecho Nº ${f.num}${f.retificacoes ? '<span class="selo-retificado">RETIFICADO</span>' : ''} <small>${dataHoraPT(f.data)}${f.posto ? ' · ' + esc(f.posto) : ''}</small></h2>`;
+  h += '<h4 class="sec-fecho">SENHAS</h4><table class="tabela tab-turno"><thead><tr><th>Produto</th><th>Tipo</th><th>Senhas</th><th>Valor</th><th>Desconto</th><th>Anuladas</th></tr></thead><tbody>';
   for (const d of det) h += `<tr><td class="esq">${esc(d.produto)}</td><td>${esc(d.formato)}</td><td>${d.senhas}</td><td>${euro(d.valor)}</td><td>${euro(d.desconto)}</td><td>${d.anuladas ? d.anuladas + ' · ' + euro(d.valorAnulado) : ''}</td></tr>`;
-  h += `<tr class="total"><td class="esq">Total</td><td></td><td>${f.senhas}</td><td>${euro(f.valor)}</td><td>${euro(f.desconto)}</td><td>${f.anuladas ? f.anuladas + ' · ' + euro(f.valorAnulado) : ''}</td></tr></tbody></table>`;
+  h += `<tr class="total"><td class="esq">Total senhas</td><td></td><td>${f.senhas}</td><td>${euro(f.valor)}</td><td>${euro(f.desconto)}</td><td>${f.anuladas ? f.anuladas + ' · ' + euro(f.valorAnulado) : ''}</td></tr></tbody></table>`;
+  h += '<h4 class="sec-fecho merch">MERCHANDISING</h4>';
+  if (!detM.length) h += '<p class="nota">Sem vendas de merchandising neste fecho.</p>';
+  else {
+    h += '<table class="tabela tab-turno"><thead><tr><th>Artigo</th><th>Tipo</th><th>Unidades</th><th>Valor</th><th>Anuladas</th></tr></thead><tbody>';
+    for (const d of detM) h += `<tr><td class="esq">${esc(d.produto)}</td><td>${esc(d.formato)}</td><td>${d.senhas}</td><td>${euro(d.valor)}</td><td>${d.anuladas ? d.anuladas + ' · ' + euro(d.valorAnulado) : ''}</td></tr>`;
+    h += `<tr class="total"><td class="esq">Total merchandising</td><td></td><td>${f.mUnidades || 0}</td><td>${euro(f.mValor || 0)}</td><td>${f.mAnuladas ? f.mAnuladas + ' · ' + euro(f.mValorAnulado) : ''}</td></tr></tbody></table>`;
+  }
+  h += `<div class="cobrar" style="margin-top:10px">VALOR EM CAIXA: ${euro(totalFecho(f))}</div>`;
+  if (f.retificacoes) {
+    h += `<h4 class="sec-fecho" style="background:var(--vermelho)">RETIFICAÇÕES</h4><p>Valor original do fecho (impresso no dia): <b>${euro(f.original.total)}</b> · valor corrigido: <b>${euro(totalFecho(f))}</b></p>` +
+      '<table class="tabela tab-turno"><thead><tr><th>Data</th><th>Quadro</th><th>Pedido</th><th>Produtos</th><th>Anulado</th><th>Correto</th><th>Diferença</th><th>Motivo</th></tr></thead><tbody>';
+    for (const r of f.retificacoes) h += `<tr><td>${dataHoraPT(r.data)}</td><td>${r.quadro === 'merch' ? 'Merch' : 'Senhas'}</td><td>${r.pedido}</td><td class="esq">${esc(r.produtos)}</td>` +
+      `<td>${euro(r.valorAnulado)}</td><td>${euro(r.valorCorrigido)}</td><td>${euro(r.diferenca)}</td><td class="esq">${esc(r.motivo)}</td></tr>`;
+    h += '</tbody></table>';
+  }
   h += `<div class="botoes-linha" style="margin-top:12px"><button class="btn cinza-escuro" data-acao="reimprimirTalao" data-n="${f.num}">IMPRIMIR TALÃO</button></div></div>`;
   h += '<div class="cartao"><h2>Vendas por hora</h2>' +
     graficoBarras(f.horas || [], 'valor', 'Euros por hora', v => euroCurto(v), '#2980b9') +
@@ -1832,24 +2350,45 @@ async function exportarExcel() {
   const wb = XLSX.utils.book_new();
   const reg = E.registo.slice().sort((a, b) => a.venda - b.venda).map(l => [
     l.venda, serialExcel(l.data), l.produto, l.qtd, 0, l.qtd, l.ini, l.fim, l.preco, l.valor, l.desconto,
-    l.estado, l.fecho || '', l.anuladaEm ? serialExcel(l.anuladaEm) : '', l.pedido, l.formato, l.motivo || '', l.posto || '', l.reimpressoes || 0
+    l.estado, l.fecho || '', l.anuladaEm ? serialExcel(l.anuladaEm) : '', l.pedido, l.formato, l.motivo || '', l.posto || '', l.reimpressoes || 0,
+    l.motivoAnulacao || '', l.correcaoDe || '', l.corrigidaPor || ''
   ]);
   XLSX.utils.book_append_sheet(wb, folha(
     ['Nº venda', 'Data/hora', 'Tipo', 'Pagas', 'Oferta', 'Total senhas', 'Senha inicial', 'Senha final', 'Preço unit.', 'Valor vendido', 'Desconto',
-      'Estado', 'Nº fecho', 'Anulada em', 'Nº pedido', 'Formato', 'Motivo', 'Posto', 'Reimpressões'],
-    reg, { 1: DHS, 8: EUR4, 9: EUR, 10: EUR, 13: DHS }, [9, 19, 18, 7, 7, 11, 13, 13, 11, 12, 10, 9, 9, 19, 9, 11, 30, 10, 11]), 'Registo');
+      'Estado', 'Nº fecho', 'Anulada em', 'Nº pedido', 'Formato', 'Motivo', 'Posto', 'Reimpressões', 'Motivo da anulação', 'Correção da venda', 'Corrigida pela venda'],
+    reg, { 1: DHS, 8: EUR4, 9: EUR, 10: EUR, 13: DHS }, [9, 19, 18, 7, 7, 11, 13, 13, 11, 12, 10, 9, 9, 19, 9, 11, 30, 10, 11, 40, 12, 14]), 'Registo');
+
+  const regM = E.registoMerch.slice().sort((a, b) => a.venda - b.venda).map(l => [
+    l.venda, serialExcel(l.data), l.produto, l.qtd, l.preco, l.valor, l.estado, l.fecho || '', l.anuladaEm ? serialExcel(l.anuladaEm) : '',
+    l.pedido, l.formato, l.motivo || '', l.posto || '', l.motivoAnulacao || '', l.correcaoDe || '', l.corrigidaPor || ''
+  ]);
+  XLSX.utils.book_append_sheet(wb, folha(
+    ['Nº venda', 'Data/hora', 'Artigo', 'Unidades', 'Preço unit.', 'Valor vendido', 'Estado', 'Nº fecho', 'Anulada em', 'Nº venda (pedido)', 'Formato',
+      'Motivo', 'Posto', 'Motivo da anulação', 'Correção da venda', 'Corrigida pela venda'],
+    regM, { 1: DHS, 4: EUR, 5: EUR, 8: DHS }, [9, 19, 20, 9, 11, 12, 9, 9, 19, 14, 10, 30, 10, 40, 12, 14]), 'Merchandising');
 
   const fec = E.fechos.map(f => [f.num, serialExcel(f.data), f.evento, f.vendaIni, f.vendaFim, f.pedidos, f.senhas, f.valor, f.desconto,
-    f.semDesconto, f.p1, f.p2, f.avulso, f.ofertas, f.anuladas, f.valorAnulado, f.posto || '']);
+    f.semDesconto, f.p1, f.p2, f.avulso, f.ofertas, f.anuladas, f.valorAnulado, f.posto || '',
+    f.mUnidades || 0, f.mValor || 0, f.mOfertas || 0, f.mAnuladas || 0, f.mValorAnulado || 0, totalFecho(f),
+    f.retificacoes ? 'Sim' : '', f.original ? f.original.total : '']);
   XLSX.utils.book_append_sheet(wb, folha(
-    ['Nº fecho', 'Data/hora', 'Evento', '1ª venda', 'Última venda', 'Pedidos', 'Senhas', 'Valor vendido', 'Desconto', 'Valor sem desconto',
-      'Pacote 1 (€)', 'Pacote 2 (€)', 'Avulso (€)', 'Senhas oferta', 'Vendas anuladas', 'Valor anulado', 'Posto'],
-    fec, { 1: DH, 7: EUR, 8: EUR, 9: EUR, 10: EUR, 11: EUR, 12: EUR, 15: EUR }, [9, 17, 22, 9, 12, 9, 9, 13, 11, 16, 12, 12, 12, 12, 14, 12, 10]), 'Fechos');
+    ['Nº fecho', 'Data/hora', 'Evento', '1ª venda', 'Última venda', 'Pedidos', 'Senhas', 'Valor senhas', 'Desconto', 'Valor sem desconto',
+      'Pacote 1 (€)', 'Pacote 2 (€)', 'Avulso (€)', 'Senhas oferta', 'Vendas anuladas', 'Valor anulado', 'Posto',
+      'Merch unidades', 'Valor merch', 'Merch ofertas', 'Merch anuladas', 'Merch valor anulado', 'Valor em caixa', 'Retificado', 'Valor original'],
+    fec, { 1: DH, 7: EUR, 8: EUR, 9: EUR, 10: EUR, 11: EUR, 12: EUR, 15: EUR, 18: EUR, 21: EUR, 22: EUR, 24: EUR },
+    [9, 17, 22, 9, 12, 9, 9, 13, 11, 16, 12, 12, 12, 12, 14, 12, 10, 13, 12, 12, 13, 17, 14, 10, 13]), 'Fechos');
 
-  const det = E.fechosDetalhe.map(d => [d.fecho, serialExcel(d.data), d.produto, d.formato, d.preco, d.senhas, d.valor, d.desconto, d.anuladas, d.valorAnulado]);
+  const det = E.fechosDetalhe.map(d => [d.fecho, serialExcel(d.data), d.quadro === 'merch' ? 'Merchandising' : 'Senhas', d.produto, d.formato, d.preco, d.senhas, d.valor, d.desconto, d.anuladas, d.valorAnulado]);
   XLSX.utils.book_append_sheet(wb, folha(
-    ['Nº fecho', 'Data/hora', 'Produto', 'Formato', 'Preço por senha', 'Senhas', 'Valor vendido', 'Desconto', 'Vendas anuladas', 'Valor anulado'],
-    det, { 1: DH, 4: EUR4, 6: EUR, 7: EUR, 9: EUR }, [9, 17, 20, 11, 15, 9, 13, 11, 15, 13]), 'FechosDetalhe');
+    ['Nº fecho', 'Data/hora', 'Quadro', 'Produto', 'Formato', 'Preço unit.', 'Senhas / unidades', 'Valor vendido', 'Desconto', 'Vendas anuladas', 'Valor anulado'],
+    det, { 1: DH, 5: EUR4, 7: EUR, 8: EUR, 10: EUR }, [9, 17, 14, 20, 11, 12, 15, 13, 11, 15, 13]), 'FechosDetalhe');
+
+  const ret = [];
+  for (const f of E.fechos) for (const r of (f.retificacoes || []))
+    ret.push([f.num, serialExcel(r.data), r.quadro === 'merch' ? 'Merchandising' : 'Senhas', r.pedido, r.vendas, r.produtos, r.valorAnulado, r.valorCorrigido, r.diferenca, r.motivo]);
+  XLSX.utils.book_append_sheet(wb, folha(
+    ['Nº fecho', 'Retificado em', 'Quadro', 'Nº pedido', 'Linhas anuladas', 'Produtos', 'Valor anulado', 'Valor correto', 'Diferença devolvida', 'Motivo'],
+    ret, { 1: DH, 6: EUR, 7: EUR, 8: EUR }, [9, 17, 14, 10, 14, 24, 13, 13, 17, 50]), 'Retificações');
 
   const hora = [];
   for (const f of E.fechos) for (const x of (f.horas || [])) hora.push([f.num, serialExcel(x.inicio), x.senhas, x.valor]);
@@ -1893,16 +2432,19 @@ $('ficheiroRestaurar').addEventListener('change', async e => {
   if (!dados || dados.app !== 'Senhas' || !est || !Array.isArray(est.produtos) || !Array.isArray(est.registo) || !est.config)
     return aviso('O ficheiro não é uma cópia de segurança da app Senhas.', 'Restaurar');
   const info = `<b>${esc(f.name)}</b><br>Criada em ${dataHoraPT(dados.criadaEm)} (v${esc(dados.versaoApp)})<br>` +
-    `Evento: <b>${esc(est.config.evento)}</b> · ${est.registo.length} linhas de venda · ${(est.fechos || []).length} fecho(s)`;
+    `Evento: <b>${esc(est.config.evento)}</b> · ${est.registo.length} linhas de senhas · ${(est.registoMerch || []).length} linhas de merchandising · ${(est.fechos || []).length} fecho(s)`;
   if (!await confirmar(info + '<br><br><b>Os dados atuais desta app são substituídos por estes.</b> Continuar?', 'Restaurar cópia', 'SIM, RESTAURAR', 'NÃO')) return;
   if (!await confirmar('Tem a certeza? Esta operação não se pode desfazer.<br>(Se quiser, faça antes uma CÓPIA DE SEGURANÇA dos dados atuais.)', 'Restaurar cópia', 'RESTAURAR', 'CANCELAR')) return;
   const chave = E.config.chaveQZ;
-  const novo = { ...estadoInicial(), ...est };
+  const novo = migrar({ ...estadoInicial(), ...est });
   novo.config = { ...CONFIG_PADRAO, ...est.config, chaveQZ: chave,
     // a forma de imprimir é deste aparelho (PC com QZ Tray, tablet com RawBT): não vem da cópia
     modoImpressao: E.config.modoImpressao, modoDetetado: E.config.modoDetetado };
   novo.pedido = [];
+  novo.pedidoMerch = [];
   E = novo;
+  anulando = null;
+  quadro = 'senhas';
   await guardar();
   modo = null;
   mostrar('entrada');
@@ -1912,11 +2454,13 @@ $('ficheiroRestaurar').addEventListener('change', async e => {
 /* ---------- NOVO EVENTO ---------- */
 async function novoEvento() {
   if (E.pedido.length) return aviso('Há um pedido por imprimir.\nCarregue em IMPRIMIR PEDIDO ou em LIMPAR antes do novo evento.', 'Novo evento');
-  const abertas = linhasTurno().length;
+  if (anulando) return aviso('Está a meio de uma anulação. Termine-a ou carregue em CANCELAR.', 'Novo evento');
+  if (E.pedidoMerch.length) return aviso('Há uma venda de merchandising por registar.\nCarregue em REGISTAR VENDA ou em LIMPAR antes do novo evento.', 'Novo evento');
+  const abertas = linhasTurno().length + linhasTurnoMerch().length;
   if (abertas) return aviso(`Há ${abertas} linha(s) de venda sem fecho de caixa.\nFaça primeiro o FECHO DE CAIXA e depois volte a carregar em NOVO EVENTO.`, 'Novo evento');
   if (!await confirmar(`<b>NOVO EVENTO</b><br><br>A app vai:<br>1. Descarregar uma cópia de segurança de tudo o que existe agora<br>` +
     `2. Apagar todas as vendas e todos os fechos<br>3. Pôr a numeração das senhas de todos os produtos a 1<br><br>` +
-    `Produtos, preços, pacotes, logótipo e impressora mantêm-se.<br><br>Continuar?`, 'Novo evento', 'CONTINUAR', 'CANCELAR')) return;
+    `Produtos (senhas e merchandising), preços, pacotes, logótipo e impressora mantêm-se.<br><br>Continuar?`, 'Novo evento', 'CONTINUAR', 'CANCELAR')) return;
   const nome = await perguntar('Nome do novo evento:', 'Novo evento', { valor: E.config.evento, max: 40 });
   if (!nome) return;
   const data = await perguntar('Data do novo evento:', 'Novo evento', { tipo: 'date', valor: new Date().toISOString().slice(0, 10) });
@@ -1928,6 +2472,9 @@ async function novoEvento() {
   E.fechosDetalhe = [];
   E.pedido = [];
   E.ultimoPedido = '';
+  E.registoMerch = [];
+  E.pedidoMerch = [];
+  E.ultimoMerch = '';
   E.produtos.forEach(p => { p.prox = 1; });
   E.config.evento = nome;
   E.config.data = data;
@@ -1953,6 +2500,7 @@ async function arrancar() {
     await guardar();
   } else {
     E.config = { ...CONFIG_PADRAO, ...E.config };   // campos novos das versões seguintes
+    if ((E.versaoDados || 1) < 2 || !E.produtosMerch || E.produtos.length < PROD_N) { migrar(E); await guardar(); }
   }
   // Primeira vez num aparelho: Android → RawBT; os outros ficam como estão
   if (!E.config.modoDetetado) {

@@ -281,3 +281,44 @@ details.chave textarea { width: 100%; font: 12px Consolas, monospace; padding: 8
 @media (max-width: 700px) {
   .cartao-grafico { display: none; }
 }
+
+/* v3.6 — pesquisa na anulação */
+.pesquisa-lista { width: 100%; box-sizing: border-box; font-size: 16px; padding: 10px 12px; border: 2px solid var(--azul); border-radius: 8px; margin: 4px 0 6px; }
+.info-pesquisa { font-size: 12px; color: var(--cinza); margin-bottom: 6px; }
+#listaPesquisa { max-height: 42vh; }
+
+/* ---------- v4.0: quadros Vendas / Merchandising, setas laterais, anulação ---------- */
+:root { --merch: #6c3483; }
+#ecraVenda { padding: 0 34px; }                       /* espaço para as setas */
+.seta-quadro {
+  position: fixed; top: 50%; transform: translateY(-50%); z-index: 4;
+  width: 40px; height: 140px; border: 0; cursor: pointer;
+  background: var(--escuro); color: #fff; font-size: 22px; opacity: .85;
+  touch-action: manipulation;
+}
+.seta-quadro:active { opacity: 1; filter: brightness(1.2); }
+.seta-quadro.esq { left: 0; border-radius: 0 12px 12px 0; }
+.seta-quadro.dir { right: 0; border-radius: 12px 0 0 12px; }
+#ecraVenda.merch .seta-quadro { background: var(--merch); }
+.faixa-quadro {
+  margin: -14px -14px 12px; padding: 8px 14px; border-radius: 12px 12px 0 0;
+  background: var(--escuro); color: #fff; font-weight: bold; letter-spacing: 1px; text-align: center;
+}
+#ecraVenda.merch .faixa-quadro { background: var(--merch); }
+#ecraVenda.merch .pedido-cabecalho { background: var(--merch); }
+.btn.pacote.escondido { visibility: hidden; }
+.cartao-pedido.a-anular { border: 3px solid var(--vermelho); }
+.cartao-pedido.a-anular .pedido-cabecalho { background: var(--vermelho) !important; }
+.anul-info { background: #fdecea; border-radius: 8px; padding: 8px 10px; margin-bottom: 8px; font-size: 14px; line-height: 1.5; }
+.pedido-acoes-anular { display: grid; grid-template-columns: 1fr 2fr; gap: 8px; padding: 0 10px 12px; }
+.pedido-acoes-anular .btn { min-height: 60px; font-size: 15px; }
+.tabela-corrigir { width: 100%; border-collapse: collapse; font-size: 14px; margin: 6px 0; }
+.tabela-corrigir td, .tabela-corrigir th { padding: 5px 4px; border-bottom: 1px solid #eee; text-align: left; }
+.tabela-corrigir .num { text-align: right; white-space: nowrap; }
+.tabela-corrigir input { width: 90px; font-size: 16px; padding: 6px; text-align: right; }
+.selo-retificado { display: inline-block; background: var(--vermelho); color: #fff; font-size: 11px; font-weight: bold; padding: 2px 6px; border-radius: 4px; margin-left: 6px; }
+@media (max-width: 700px) { #ecraVenda { padding: 0 26px; } .seta-quadro { width: 28px; height: 110px; font-size: 16px; } }
+.sec-fecho { margin: 12px 0 6px; padding: 5px 10px; border-radius: 6px; background: var(--escuro); color: #fff; font-size: 13px; letter-spacing: 1px; }
+.sec-fecho.merch { background: var(--merch); }
+.sec-turno { margin: 18px 0 8px; color: var(--escuro); letter-spacing: 1px; font-size: 15px; border-bottom: 3px solid var(--escuro); padding-bottom: 4px; }
+.sec-turno.merch { color: var(--merch); border-color: var(--merch); }
